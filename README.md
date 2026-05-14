@@ -28,7 +28,7 @@
 یک دستور ساده در Termux:
 
 ```bash
-pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/4n0nymou3/CF-Clean-IP-Scanner/releases/latest/download/cf-scanner-arm64.zip && unzip cf-scanner-arm64.zip && chmod +x cf-scanner
+pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/4n0nymou3/CF-Clean-IP-Scanner/releases/download/v2.2.0/cf-scanner-arm64-v2.2.0.zip && unzip cf-scanner-arm64.zip && chmod +x cf-scanner
 ```
 
 سپس اجرا کنید:
