@@ -117,12 +117,11 @@ jobs:
           EOF
           echo "Sample configs created"
 
-      - name: Create full zip package with Xray included
+      - name: Create zip package
         run: |
-          ZIP_NAME="cf-scanner-arm64-v${{ github.event.inputs.version }}.zip"
-          zip -r "$ZIP_NAME" cf-scanner xray/ config/
-          echo "Created $ZIP_NAME"
-          ls -lh "$ZIP_NAME"
+          zip -r cf-scanner-arm64.zip cf-scanner xray/ config/
+          echo "Created cf-scanner-arm64.zip"
+          ls -lh cf-scanner-arm64.zip
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
@@ -130,7 +129,7 @@ jobs:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
-          files: cf-scanner-arm64-v${{ github.event.inputs.version }}.zip
+          files: cf-scanner-arm64.zip
           body: |
             ## CF Clean IP Scanner v${{ github.event.inputs.version }}
             
@@ -139,10 +138,12 @@ jobs:
             ### Installation (Direct Download)
             
             ```
-            pkg update && pkg upgrade && pkg install wget unzip
-            wget https://github.com/${{ github.repository }}/releases/download/v${{ github.event.inputs.version }}/cf-scanner-arm64-v${{ github.event.inputs.version }}.zip
-            unzip cf-scanner-arm64-v${{ github.event.inputs.version }}.zip
-            chmod +x cf-scanner
+            pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/${{ github.repository }}/releases/latest/download/cf-scanner-arm64.zip && unzip cf-scanner-arm64.zip && chmod +x cf-scanner
+            ```
+            
+            Then run:
+            
+            ```
             ./cf-scanner
             ```
             
