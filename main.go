@@ -16,7 +16,7 @@ import (
 	"github.com/4n0nymou3/CF-Clean-IP-Scanner/utils"
 )
 
-const version = "2.1.1"
+const version = "2.2.0"
 
 func formatDuration(d time.Duration) string {
 	h := int(d.Hours())
@@ -57,9 +57,10 @@ func askScanMode() int {
 				color.New(color.FgRed).Println("Error: Xray binary not found. Please reinstall the tool.")
 				os.Exit(1)
 			}
-			if _, err := os.Stat("./config/xray_config.json"); os.IsNotExist(err) {
-				color.New(color.FgRed).Println("Error: Xray config not found at config/xray_config.json")
-				color.New(color.FgYellow).Println("Please edit the sample config file first.")
+			if !scanner.HasXrayConfig() {
+				color.New(color.FgRed).Println("Error: No Xray config found.")
+				color.New(color.FgYellow).Println("  For URL format: edit config/xray_config.txt")
+				color.New(color.FgYellow).Println("  For JSON format: edit config/xray_config.json")
 				os.Exit(1)
 			}
 			return 2
