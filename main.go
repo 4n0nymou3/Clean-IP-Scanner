@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/4n0nymou3/CF-Clean-IP-Scanner/config"
 	"github.com/4n0nymou3/CF-Clean-IP-Scanner/scanner"
 	"github.com/4n0nymou3/CF-Clean-IP-Scanner/utils"
+	"github.com/fatih/color"
 )
 
-const version = "2.3.1"
+const version = "2.3.2"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -71,6 +71,19 @@ func askScanMode() int {
 				color.New(color.FgWhite).Println("  For JSON config: edit config/xray_config.json (paste full Xray JSON config)")
 				os.Exit(1)
 			}
+			
+			fmt.Println()
+			color.New(color.FgCyan).Println("Running Xray environment self-test...")
+			if err := scanner.SelfTestXray(); err != nil {
+				fmt.Println()
+				color.New(color.FgRed, color.Bold).Println("XRAY SELF-TEST FAILED!")
+				color.New(color.FgYellow).Println("The Xray core could not start correctly on your device.")
+				fmt.Println()
+				color.New(color.FgWhite).Println(err.Error())
+				os.Exit(1)
+			}
+			color.New(color.FgGreen).Println("Xray self-test passed successfully!")
+			
 			return 2
 		} else {
 			color.New(color.FgRed).Println("Invalid choice. Please enter 1 or 2.")
