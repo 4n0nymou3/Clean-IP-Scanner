@@ -31,13 +31,14 @@ const (
 	xrayTestNum           = 10
 	xrayMinSpeed          = 0.0
 	xrayPort              = 443
-	xrayWorkerCount       = 8
-	xraySocksReadyTimeout = 4 * time.Second
+	xrayWorkerCount       = 1
+	xraySocksReadyTimeout = 8 * time.Second
 	xrayPortBase          = 11080
 	xrayPingTimes         = 1
 	xrayPingTimeout       = 12 * time.Second
 	xrayURLConfigPath     = "./config/xray_config.txt"
 	xrayJSONConfigPath    = "./config/xray_config.json"
+	xrayKillSleep         = 500 * time.Millisecond
 )
 
 type xraySocksInfo struct {
@@ -77,6 +78,79 @@ var jsonPlaceholders = []string{
 	"your-uuid-here",
 	"ip_placeholder",
 	"your-domain.com",
+}
+
+var xrayDiag struct {
+	mu             sync.Mutex
+	startupTimeout int
+	httpError      int
+	wrongStatus    int
+	configError    int
+	firstStderr    string
+	firstStderrSet bool
+}
+
+func resetXrayDiag() {
+	xrayDiag.mu.Lock()
+	xrayDiag.startupTimeout = 0
+	xrayDiag.httpError = 0
+	xrayDiag.wrongStatus = 0
+	xrayDiag.configError = 0
+	xrayDiag.firstStderr = ""
+	xrayDiag.firstStderrSet = false
+	xrayDiag.mu.Unlock()
+}
+
+func recordDiag(field string, stderrMsg string) {
+	xrayDiag.mu.Lock()
+	switch field {
+	case "startupTimeout":
+		xrayDiag.startupTimeout++
+	case "httpError":
+		xrayDiag.httpError++
+	case "wrongStatus":
+		xrayDiag.wrongStatus++
+	case "configError":
+		xrayDiag.configError++
+	}
+	if stderrMsg != "" && !xrayDiag.firstStderrSet {
+		xrayDiag.firstStderr = stderrMsg
+		xrayDiag.firstStderrSet = true
+	}
+	xrayDiag.mu.Unlock()
+}
+
+func GetXrayDiagInfo() string {
+	xrayDiag.mu.Lock()
+	defer xrayDiag.mu.Unlock()
+
+	total := xrayDiag.startupTimeout + xrayDiag.httpError + xrayDiag.wrongStatus + xrayDiag.configError
+	if total == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n--- Xray Diagnostic Report ---\n")
+	if xrayDiag.configError > 0 {
+		sb.WriteString(fmt.Sprintf("  Config build errors   : %d\n", xrayDiag.configError))
+	}
+	if xrayDiag.startupTimeout > 0 {
+		sb.WriteString(fmt.Sprintf("  Xray startup timeouts : %d\n", xrayDiag.startupTimeout))
+		sb.WriteString("    → Xray process could not bind port in time on this device.\n")
+	}
+	if xrayDiag.httpError > 0 {
+		sb.WriteString(fmt.Sprintf("  HTTP request errors   : %d\n", xrayDiag.httpError))
+		sb.WriteString("    → Xray started but requests failed. Check VLESS config/server.\n")
+	}
+	if xrayDiag.wrongStatus > 0 {
+		sb.WriteString(fmt.Sprintf("  Wrong HTTP status     : %d\n", xrayDiag.wrongStatus))
+		sb.WriteString("    → Server replied but with unexpected status code.\n")
+	}
+	if xrayDiag.firstStderr != "" {
+		sb.WriteString(fmt.Sprintf("  First Xray error output:\n    %s\n", strings.ReplaceAll(strings.TrimSpace(xrayDiag.firstStderr), "\n", "\n    ")))
+	}
+	sb.WriteString("------------------------------\n")
+	return sb.String()
 }
 
 func waitForSocksReady(port int, timeout time.Duration) error {
@@ -984,16 +1058,20 @@ func SelfTestXray() error {
 	cmd.Stderr = &out
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Failed to start Xray binary. Ensure it is executable.\nError: %v\nOutput: %s", err, out.String())
+		return fmt.Errorf("Failed to start Xray binary. Ensure it is executable and present at ./xray/xray\nError: %v", err)
 	}
 
-	err = waitForSocksReady(10085, 3*time.Second)
+	err = waitForSocksReady(10085, 6*time.Second)
 
 	cmd.Process.Kill()
 	cmd.Wait()
 
 	if err != nil {
-		return fmt.Errorf("Xray started but port binding failed or it crashed immediately.\nError: %v\nXray Output:\n%s", err, out.String())
+		errOutput := strings.TrimSpace(out.String())
+		if errOutput != "" {
+			return fmt.Errorf("Xray failed to bind port within 6 seconds.\nXray output:\n%s", errOutput)
+		}
+		return fmt.Errorf("Xray failed to bind port within 6 seconds. No output captured.\nThis is the known Android/Termux startup issue. Try restarting Termux and running again.")
 	}
 
 	return nil
@@ -1002,28 +1080,35 @@ func SelfTestXray() error {
 func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Duration) {
 	configPath, socksInfo, err := createTempConfigWithIP(ip.String(), socksPort)
 	if err != nil {
+		recordDiag("configError", "")
 		return
 	}
 	defer os.Remove(configPath)
 
 	cmd := exec.Command("./xray/xray", "run", "-c", configPath)
+	var stderrBuf bytes.Buffer
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderrBuf
+
 	if err := cmd.Start(); err != nil {
+		recordDiag("configError", fmt.Sprintf("cmd.Start() failed: %v", err))
 		return
 	}
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(xrayKillSleep)
 	}()
 
 	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
+		stderrOutput := strings.TrimSpace(stderrBuf.String())
+		recordDiag("startupTimeout", stderrOutput)
 		return
 	}
 
 	dialer, err := createSocksDialer(socksInfo)
 	if err != nil {
+		recordDiag("configError", fmt.Sprintf("createSocksDialer failed: %v", err))
 		return
 	}
 
@@ -1043,13 +1128,17 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 
 	start := time.Now()
 	resp, err := httpClient.Get("https://cp.cloudflare.com/generate_204")
-	if err == nil {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode == 200 || resp.StatusCode == 204 {
-			recv = 1
-			totalDelay = time.Since(start)
-		}
+	if err != nil {
+		recordDiag("httpError", "")
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == 200 || resp.StatusCode == 204 {
+		recv = 1
+		totalDelay = time.Since(start)
+	} else {
+		recordDiag("wrongStatus", fmt.Sprintf("HTTP status: %d", resp.StatusCode))
 	}
 	return
 }
@@ -1059,6 +1148,8 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 		color.New(color.FgRed).Println("ERROR: Xray binary not found at ./xray/xray")
 		return nil
 	}
+
+	resetXrayDiag()
 
 	var results []PingResult
 	var mu sync.Mutex
@@ -1115,6 +1206,14 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 	})
 
 	fmt.Println()
+
+	if len(results) == 0 {
+		diagInfo := GetXrayDiagInfo()
+		if diagInfo != "" {
+			color.New(color.FgYellow).Print(diagInfo)
+		}
+	}
+
 	color.New(color.FgGreen).Printf("Latency test completed (Xray): %d responsive IPs found\n\n", len(results))
 	return results
 }
@@ -1135,7 +1234,7 @@ func downloadSpeedViaXray(ip *net.IPAddr, socksPort int) float64 {
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(xrayKillSleep)
 	}()
 
 	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
