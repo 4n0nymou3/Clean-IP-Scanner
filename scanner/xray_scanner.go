@@ -35,10 +35,12 @@ const (
 	xraySocksReadyTimeout = 8 * time.Second
 	xrayPortBase          = 11080
 	xrayPingTimes         = 1
-	xrayPingTimeout       = 12 * time.Second
+	xrayPingTimeout       = 10 * time.Second
 	xrayURLConfigPath     = "./config/xray_config.txt"
 	xrayJSONConfigPath    = "./config/xray_config.json"
-	xrayKillSleep         = 500 * time.Millisecond
+	xrayKillSleep         = 600 * time.Millisecond
+	xrayPreTestPort       = 10090
+	xrayPreTestTimeout    = 20 * time.Second
 )
 
 type xraySocksInfo struct {
@@ -47,6 +49,20 @@ type xraySocksInfo struct {
 	User    string
 	Pass    string
 }
+
+type xrayFailReason struct {
+	ip     string
+	reason string
+}
+
+var xrayDiagMu sync.Mutex
+var xrayDiagStartupTimeout int
+var xrayDiagHTTPError int
+var xrayDiagWrongStatus int
+var xrayDiagConfigError int
+var xrayDiagFirstStderrSet bool
+var xrayDiagFirstStderr string
+var xrayFirstFailures []xrayFailReason
 
 var allowedStreamFields = map[string]bool{
 	"network":             true,
@@ -80,76 +96,86 @@ var jsonPlaceholders = []string{
 	"your-domain.com",
 }
 
-var xrayDiag struct {
-	mu             sync.Mutex
-	startupTimeout int
-	httpError      int
-	wrongStatus    int
-	configError    int
-	firstStderr    string
-	firstStderrSet bool
-}
-
 func resetXrayDiag() {
-	xrayDiag.mu.Lock()
-	xrayDiag.startupTimeout = 0
-	xrayDiag.httpError = 0
-	xrayDiag.wrongStatus = 0
-	xrayDiag.configError = 0
-	xrayDiag.firstStderr = ""
-	xrayDiag.firstStderrSet = false
-	xrayDiag.mu.Unlock()
+	xrayDiagMu.Lock()
+	xrayDiagStartupTimeout = 0
+	xrayDiagHTTPError = 0
+	xrayDiagWrongStatus = 0
+	xrayDiagConfigError = 0
+	xrayDiagFirstStderr = ""
+	xrayDiagFirstStderrSet = false
+	xrayFirstFailures = nil
+	xrayDiagMu.Unlock()
 }
 
-func recordDiag(field string, stderrMsg string) {
-	xrayDiag.mu.Lock()
+func recordDiag(field string, ipStr string, detail string) {
+	xrayDiagMu.Lock()
 	switch field {
 	case "startupTimeout":
-		xrayDiag.startupTimeout++
+		xrayDiagStartupTimeout++
 	case "httpError":
-		xrayDiag.httpError++
+		xrayDiagHTTPError++
 	case "wrongStatus":
-		xrayDiag.wrongStatus++
+		xrayDiagWrongStatus++
 	case "configError":
-		xrayDiag.configError++
+		xrayDiagConfigError++
 	}
-	if stderrMsg != "" && !xrayDiag.firstStderrSet {
-		xrayDiag.firstStderr = stderrMsg
-		xrayDiag.firstStderrSet = true
+	if detail != "" && !xrayDiagFirstStderrSet {
+		xrayDiagFirstStderr = detail
+		xrayDiagFirstStderrSet = true
 	}
-	xrayDiag.mu.Unlock()
+	if ipStr != "" && len(xrayFirstFailures) < 3 {
+		reason := field
+		if detail != "" {
+			reason = detail
+		}
+		xrayFirstFailures = append(xrayFirstFailures, xrayFailReason{ip: ipStr, reason: reason})
+	}
+	xrayDiagMu.Unlock()
 }
 
 func GetXrayDiagInfo() string {
-	xrayDiag.mu.Lock()
-	defer xrayDiag.mu.Unlock()
+	xrayDiagMu.Lock()
+	defer xrayDiagMu.Unlock()
 
-	total := xrayDiag.startupTimeout + xrayDiag.httpError + xrayDiag.wrongStatus + xrayDiag.configError
+	total := xrayDiagStartupTimeout + xrayDiagHTTPError + xrayDiagWrongStatus + xrayDiagConfigError
 	if total == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
-	sb.WriteString("\n--- Xray Diagnostic Report ---\n")
-	if xrayDiag.configError > 0 {
-		sb.WriteString(fmt.Sprintf("  Config build errors   : %d\n", xrayDiag.configError))
+	sb.WriteString("\n========== Xray Diagnostic Report ==========\n")
+
+	if xrayDiagStartupTimeout > 0 {
+		sb.WriteString(fmt.Sprintf("  Xray startup timeouts : %d\n", xrayDiagStartupTimeout))
+		sb.WriteString("    The Xray port did not bind in time. Device may be under load.\n")
 	}
-	if xrayDiag.startupTimeout > 0 {
-		sb.WriteString(fmt.Sprintf("  Xray startup timeouts : %d\n", xrayDiag.startupTimeout))
-		sb.WriteString("    → Xray process could not bind port in time on this device.\n")
+	if xrayDiagHTTPError > 0 {
+		sb.WriteString(fmt.Sprintf("  HTTP connection errors : %d\n", xrayDiagHTTPError))
+		sb.WriteString("    Xray started but the tunnel connection to the remote server failed.\n")
+		sb.WriteString("    Most likely cause: your VLESS/VMess config is not reachable via these IPs.\n")
 	}
-	if xrayDiag.httpError > 0 {
-		sb.WriteString(fmt.Sprintf("  HTTP request errors   : %d\n", xrayDiag.httpError))
-		sb.WriteString("    → Xray started but requests failed. Check VLESS config/server.\n")
+	if xrayDiagWrongStatus > 0 {
+		sb.WriteString(fmt.Sprintf("  Wrong HTTP status      : %d\n", xrayDiagWrongStatus))
 	}
-	if xrayDiag.wrongStatus > 0 {
-		sb.WriteString(fmt.Sprintf("  Wrong HTTP status     : %d\n", xrayDiag.wrongStatus))
-		sb.WriteString("    → Server replied but with unexpected status code.\n")
+	if xrayDiagConfigError > 0 {
+		sb.WriteString(fmt.Sprintf("  Config build errors    : %d\n", xrayDiagConfigError))
 	}
-	if xrayDiag.firstStderr != "" {
-		sb.WriteString(fmt.Sprintf("  First Xray error output:\n    %s\n", strings.ReplaceAll(strings.TrimSpace(xrayDiag.firstStderr), "\n", "\n    ")))
+
+	if len(xrayFirstFailures) > 0 {
+		sb.WriteString("\n  First few failures:\n")
+		for _, f := range xrayFirstFailures {
+			sb.WriteString(fmt.Sprintf("    %-20s %s\n", f.ip, f.reason))
+		}
 	}
-	sb.WriteString("------------------------------\n")
+
+	if xrayDiagHTTPError > 0 || xrayDiagStartupTimeout > 0 {
+		sb.WriteString("\n  WHAT TO DO:\n")
+		sb.WriteString("    1. Make sure your VLESS config works in v2rayNG first.\n")
+		sb.WriteString("    2. Run without Psiphon active — it may interfere with Xray.\n")
+		sb.WriteString("    3. Try again — network conditions may have changed.\n")
+	}
+	sb.WriteString("=============================================\n")
 	return sb.String()
 }
 
@@ -373,6 +399,69 @@ func readXrayConfig() (string, bool, error) {
 		return "", false, fmt.Errorf("no config found: checked %s and %s", xrayURLConfigPath, xrayJSONConfigPath)
 	}
 	return strings.TrimSpace(string(data)), false, nil
+}
+
+func extractOriginalServerFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+func extractOriginalServerFromJSON(content string) string {
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
+		return ""
+	}
+	outbounds, ok := cfg["outbounds"].([]interface{})
+	if !ok {
+		return ""
+	}
+	skipProtos := map[string]bool{"freedom": true, "blackhole": true, "dns": true}
+	for _, out := range outbounds {
+		outMap, ok := out.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		proto, _ := outMap["protocol"].(string)
+		if skipProtos[strings.ToLower(proto)] {
+			continue
+		}
+		settings, ok := outMap["settings"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(proto) {
+		case "vless", "vmess":
+			vnext, ok := settings["vnext"].([]interface{})
+			if !ok || len(vnext) == 0 {
+				continue
+			}
+			server, ok := vnext[0].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			addr, _ := server["address"].(string)
+			if addr != "" {
+				return addr
+			}
+		case "trojan", "shadowsocks":
+			servers, ok := settings["servers"].([]interface{})
+			if !ok || len(servers) == 0 {
+				continue
+			}
+			server, ok := servers[0].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			addr, _ := server["address"].(string)
+			if addr != "" {
+				return addr
+			}
+		}
+	}
+	return ""
 }
 
 func buildStreamSettings(network, security, sni, fp, path, headerHost string, allowInsecure bool, pbk, sid, spx string) map[string]interface{} {
@@ -923,7 +1012,6 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			return "", nil, fmt.Errorf("vless/vmess server entry is invalid")
 		}
 		server["address"] = ip
-		server["port"] = float64(xrayPort)
 		vnextSlice[0] = server
 		settings["vnext"] = vnextSlice
 		ipUpdated = true
@@ -941,7 +1029,6 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			return "", nil, fmt.Errorf("trojan/shadowsocks server entry is invalid")
 		}
 		server["address"] = ip
-		server["port"] = float64(xrayPort)
 		serversSlice[0] = server
 		settings["servers"] = serversSlice
 		ipUpdated = true
@@ -1028,6 +1115,26 @@ func createSocksDialer(socksInfo *xraySocksInfo) (proxy.Dialer, error) {
 	return proxy.SOCKS5("tcp", addr, nil, proxy.Direct)
 }
 
+func makeTestHTTPClient(socksInfo *xraySocksInfo, timeout time.Duration) (*http.Client, error) {
+	dialer, err := createSocksDialer(socksInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+			DisableKeepAlives: true,
+		},
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}, nil
+}
+
 func SelfTestXray() error {
 	cfg := map[string]interface{}{
 		"log": map[string]interface{}{
@@ -1058,7 +1165,7 @@ func SelfTestXray() error {
 	cmd.Stderr = &out
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Failed to start Xray binary. Ensure it is executable and present at ./xray/xray\nError: %v", err)
+		return fmt.Errorf("Failed to start Xray binary. Make sure it exists at ./xray/xray and is executable.\nError: %v", err)
 	}
 
 	err = waitForSocksReady(10085, 6*time.Second)
@@ -1071,16 +1178,95 @@ func SelfTestXray() error {
 		if errOutput != "" {
 			return fmt.Errorf("Xray failed to bind port within 6 seconds.\nXray output:\n%s", errOutput)
 		}
-		return fmt.Errorf("Xray failed to bind port within 6 seconds. No output captured.\nThis is the known Android/Termux startup issue. Try restarting Termux and running again.")
+		return fmt.Errorf("Xray failed to bind port within 6 seconds.\nTry restarting Termux and running again.")
 	}
 
 	return nil
 }
 
+func PreTestXrayConfig() error {
+	content, isURL, err := readXrayConfig()
+	if err != nil {
+		return fmt.Errorf("cannot read config: %v", err)
+	}
+
+	var originalServer string
+	if isURL {
+		originalServer = extractOriginalServerFromURL(content)
+	} else {
+		originalServer = extractOriginalServerFromJSON(content)
+	}
+
+	if originalServer == "" {
+		return fmt.Errorf("cannot determine original server address from config")
+	}
+
+	color.New(color.FgCyan).Printf("Testing proxy connectivity with original server (%s)...\n", originalServer)
+
+	configPath, socksInfo, err := createTempConfigWithIP(originalServer, xrayPreTestPort)
+	if err != nil {
+		return fmt.Errorf("cannot build config for pre-test: %v", err)
+	}
+	defer os.Remove(configPath)
+
+	cmd := exec.Command("./xray/xray", "run", "-c", configPath)
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("cannot start Xray: %v", err)
+	}
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+		time.Sleep(xrayKillSleep)
+	}()
+
+	if err := waitForSocksReady(xrayPreTestPort, xraySocksReadyTimeout); err != nil {
+		xrayOut := strings.TrimSpace(stderrBuf.String())
+		if xrayOut != "" {
+			return fmt.Errorf("Xray SOCKS port did not become ready.\nXray output:\n%s", xrayOut)
+		}
+		return fmt.Errorf("Xray SOCKS port did not become ready in %v.\nTry restarting Termux.", xraySocksReadyTimeout)
+	}
+
+	httpClient, err := makeTestHTTPClient(socksInfo, xrayPreTestTimeout)
+	if err != nil {
+		return fmt.Errorf("cannot create HTTP client: %v", err)
+	}
+
+	resp, err := httpClient.Get("https://cp.cloudflare.com/generate_204")
+	if err != nil {
+		xrayOut := strings.TrimSpace(stderrBuf.String())
+		msg := fmt.Sprintf("Pre-test FAILED: cannot reach proxy server.\nHTTP error: %v", err)
+		if xrayOut != "" {
+			msg += fmt.Sprintf("\nXray messages:\n%s", xrayOut)
+		}
+		msg += "\n"
+		msg += "\nThis means your VLESS/VMess config is not working."
+		msg += "\nSteps to fix:"
+		msg += "\n  1. Open v2rayNG and import this config."
+		msg += "\n  2. Connect and verify internet works."
+		msg += "\n  3. If v2rayNG also fails, get a working config first."
+		msg += "\n  4. If v2rayNG works but scanner fails, try turning Psiphon OFF"
+		msg += "\n     before starting the Xray scan (Psiphon may interfere)."
+		return fmt.Errorf(msg)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode == 200 || resp.StatusCode == 204 {
+		return nil
+	}
+
+	return fmt.Errorf("pre-test got unexpected HTTP status: %d\nCheck your config and try again.", resp.StatusCode)
+}
+
 func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Duration) {
 	configPath, socksInfo, err := createTempConfigWithIP(ip.String(), socksPort)
 	if err != nil {
-		recordDiag("configError", "")
+		recordDiag("configError", ip.String(), fmt.Sprintf("build config: %v", err))
 		return
 	}
 	defer os.Remove(configPath)
@@ -1091,7 +1277,7 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		recordDiag("configError", fmt.Sprintf("cmd.Start() failed: %v", err))
+		recordDiag("configError", ip.String(), fmt.Sprintf("start xray: %v", err))
 		return
 	}
 	defer func() {
@@ -1101,35 +1287,21 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 	}()
 
 	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
-		stderrOutput := strings.TrimSpace(stderrBuf.String())
-		recordDiag("startupTimeout", stderrOutput)
+		stderrOut := strings.TrimSpace(stderrBuf.String())
+		recordDiag("startupTimeout", ip.String(), stderrOut)
 		return
 	}
 
-	dialer, err := createSocksDialer(socksInfo)
-	if err != nil {
-		recordDiag("configError", fmt.Sprintf("createSocksDialer failed: %v", err))
+	httpClient, httpErr := makeTestHTTPClient(socksInfo, xrayPingTimeout)
+	if httpErr != nil {
+		recordDiag("configError", ip.String(), fmt.Sprintf("dialer: %v", httpErr))
 		return
-	}
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
-			},
-			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
-			DisableKeepAlives: true,
-		},
-		Timeout: xrayPingTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
 	}
 
 	start := time.Now()
 	resp, err := httpClient.Get("https://cp.cloudflare.com/generate_204")
 	if err != nil {
-		recordDiag("httpError", "")
+		recordDiag("httpError", ip.String(), fmt.Sprintf("http err: %v", err))
 		return
 	}
 	io.Copy(io.Discard, resp.Body)
@@ -1138,7 +1310,7 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 		recv = 1
 		totalDelay = time.Since(start)
 	} else {
-		recordDiag("wrongStatus", fmt.Sprintf("HTTP status: %d", resp.StatusCode))
+		recordDiag("wrongStatus", ip.String(), fmt.Sprintf("http status: %d", resp.StatusCode))
 	}
 	return
 }
@@ -1207,11 +1379,9 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 
 	fmt.Println()
 
-	if len(results) == 0 {
-		diagInfo := GetXrayDiagInfo()
-		if diagInfo != "" {
-			color.New(color.FgYellow).Print(diagInfo)
-		}
+	diagInfo := GetXrayDiagInfo()
+	if diagInfo != "" {
+		color.New(color.FgYellow).Print(diagInfo)
 	}
 
 	color.New(color.FgGreen).Printf("Latency test completed (Xray): %d responsive IPs found\n\n", len(results))
@@ -1241,20 +1411,9 @@ func downloadSpeedViaXray(ip *net.IPAddr, socksPort int) float64 {
 		return 0.0
 	}
 
-	dialer, err := createSocksDialer(socksInfo)
+	httpClient, err := makeTestHTTPClient(socksInfo, xrayDownloadTimeout)
 	if err != nil {
 		return 0.0
-	}
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
-			},
-			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
-			DisableKeepAlives: true,
-		},
-		Timeout: xrayDownloadTimeout,
 	}
 
 	req, err := http.NewRequest("GET", xrayDownloadURL, nil)
