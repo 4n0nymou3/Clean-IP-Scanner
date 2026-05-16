@@ -24,20 +24,19 @@ import (
 )
 
 const (
-	xrayBufferSize      = 1024
-	xrayDownloadURL     = "https://speed.cloudflare.com/__down?bytes=52428800"
-	xrayDownloadTimeout = 10 * time.Second
-	xrayTestNum         = 10
-	xrayMinSpeed        = 0.0
-	xrayPort            = 443
-	xrayWorkerCount     = 8
-	xrayStartupDelay    = 350 * time.Millisecond
-	xrayPortBase        = 11080
-	xrayPingTimes       = 3
-	xrayPingTimeout     = 3 * time.Second
-	xrayPingInterval    = 50 * time.Millisecond
-	xrayURLConfigPath   = "./config/xray_config.txt"
-	xrayJSONConfigPath  = "./config/xray_config.json"
+	xrayBufferSize        = 1024
+	xrayDownloadURL       = "https://speed.cloudflare.com/__down?bytes=52428800"
+	xrayDownloadTimeout   = 15 * time.Second
+	xrayTestNum           = 10
+	xrayMinSpeed          = 0.0
+	xrayPort              = 443
+	xrayWorkerCount       = 3
+	xraySocksReadyTimeout = 4 * time.Second
+	xrayPortBase          = 11080
+	xrayPingTimes         = 1
+	xrayPingTimeout       = 12 * time.Second
+	xrayURLConfigPath     = "./config/xray_config.txt"
+	xrayJSONConfigPath    = "./config/xray_config.json"
 )
 
 type xraySocksInfo struct {
@@ -77,6 +76,19 @@ var jsonPlaceholders = []string{
 	"your-uuid-here",
 	"ip_placeholder",
 	"your-domain.com",
+}
+
+func waitForSocksReady(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("xray not ready on port %d after %v", port, timeout)
 }
 
 func cleanStreamSettings(ss map[string]interface{}) map[string]interface{} {
@@ -132,7 +144,6 @@ func validateURLConfig(rawURL string) error {
 	if len(parts) != 2 || parts[1] == "" {
 		return fmt.Errorf("not a valid proxy URL format")
 	}
-
 	scheme := strings.ToLower(parts[0])
 	validSchemes := map[string]bool{
 		"vless": true, "vmess": true, "trojan": true,
@@ -141,14 +152,12 @@ func validateURLConfig(rawURL string) error {
 	if !validSchemes[scheme] {
 		return fmt.Errorf("unsupported protocol '%s' — supported: vless, vmess, trojan, ss", scheme)
 	}
-
 	lowerURL := strings.ToLower(rawURL)
 	for _, p := range urlPlaceholders {
 		if strings.Contains(lowerURL, strings.ToLower(p)) {
 			return fmt.Errorf("config contains placeholder value '%s' — please replace with your real config", p)
 		}
 	}
-
 	switch scheme {
 	case "vmess":
 		encoded := strings.TrimPrefix(rawURL, "vmess://")
@@ -163,12 +172,10 @@ func validateURLConfig(rawURL string) error {
 		if err := json.Unmarshal(decoded, &v); err != nil {
 			return fmt.Errorf("invalid vmess URL: cannot parse inner JSON")
 		}
-		id, _ := v["id"].(string)
-		if id == "" {
+		if id, _ := v["id"].(string); id == "" {
 			return fmt.Errorf("vmess config missing 'id' field")
 		}
-		add, _ := v["add"].(string)
-		if add == "" {
+		if add, _ := v["add"].(string); add == "" {
 			return fmt.Errorf("vmess config missing server address ('add' field)")
 		}
 	default:
@@ -183,7 +190,6 @@ func validateURLConfig(rawURL string) error {
 			return fmt.Errorf("%s config missing server address", scheme)
 		}
 	}
-
 	return nil
 }
 
@@ -192,7 +198,6 @@ func validateJSONConfig(content string) error {
 	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
 		return fmt.Errorf("invalid JSON: %v", err)
 	}
-
 	inboundsRaw, ok := cfg["inbounds"]
 	if !ok {
 		return fmt.Errorf("config missing 'inbounds' field")
@@ -207,8 +212,7 @@ func validateJSONConfig(content string) error {
 		if !ok {
 			continue
 		}
-		proto, _ := inMap["protocol"].(string)
-		if strings.ToLower(proto) == "socks" {
+		if strings.ToLower(inMap["protocol"].(string)) == "socks" {
 			hasSocks = true
 			break
 		}
@@ -216,7 +220,6 @@ func validateJSONConfig(content string) error {
 	if !hasSocks {
 		return fmt.Errorf("config has no SOCKS inbound — please add a socks inbound")
 	}
-
 	outboundsRaw, ok := cfg["outbounds"]
 	if !ok {
 		return fmt.Errorf("config missing 'outbounds' field")
@@ -225,7 +228,6 @@ func validateJSONConfig(content string) error {
 	if !ok || len(outbounds) == 0 {
 		return fmt.Errorf("'outbounds' must be a non-empty array")
 	}
-
 	skipProtos := map[string]bool{"freedom": true, "blackhole": true, "dns": true}
 	var proxyOut map[string]interface{}
 	for _, out := range outbounds {
@@ -242,7 +244,6 @@ func validateJSONConfig(content string) error {
 	if proxyOut == nil {
 		return fmt.Errorf("config has no proxy outbound — add a vless, vmess, trojan or shadowsocks outbound")
 	}
-
 	cfgBytes, _ := json.Marshal(cfg)
 	cfgStr := string(cfgBytes)
 	for _, p := range jsonPlaceholders {
@@ -250,7 +251,6 @@ func validateJSONConfig(content string) error {
 			return fmt.Errorf("config contains placeholder value '%s' — please replace with your real config", p)
 		}
 	}
-
 	return nil
 }
 
@@ -268,7 +268,6 @@ func ValidateXrayConfig() error {
 			return nil
 		}
 	}
-
 	data, err := os.ReadFile(xrayJSONConfigPath)
 	if err != nil {
 		return fmt.Errorf("no config found — please edit config/xray_config.txt (URL) or config/xray_config.json (JSON)")
@@ -305,15 +304,10 @@ func buildStreamSettings(network, security, sni, fp, path, headerHost string, al
 	if network == "" {
 		network = "tcp"
 	}
-	ss := map[string]interface{}{
-		"network": network,
-	}
-
+	ss := map[string]interface{}{"network": network}
 	switch strings.ToLower(security) {
 	case "tls":
-		tlsSettings := map[string]interface{}{
-			"allowInsecure": allowInsecure,
-		}
+		tlsSettings := map[string]interface{}{"allowInsecure": allowInsecure}
 		if sni != "" {
 			tlsSettings["serverName"] = sni
 		}
@@ -323,9 +317,7 @@ func buildStreamSettings(network, security, sni, fp, path, headerHost string, al
 		ss["security"] = "tls"
 		ss["tlsSettings"] = tlsSettings
 	case "reality":
-		realitySettings := map[string]interface{}{
-			"show": false,
-		}
+		realitySettings := map[string]interface{}{"show": false}
 		if sni != "" {
 			realitySettings["serverName"] = sni
 		}
@@ -346,7 +338,6 @@ func buildStreamSettings(network, security, sni, fp, path, headerHost string, al
 	default:
 		ss["security"] = "none"
 	}
-
 	switch strings.ToLower(network) {
 	case "ws":
 		wsSettings := map[string]interface{}{}
@@ -392,7 +383,6 @@ func buildStreamSettings(network, security, sni, fp, path, headerHost string, al
 		}
 		ss["splithttpSettings"] = splitSettings
 	}
-
 	return ss
 }
 
@@ -401,19 +391,16 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fmt.Errorf("invalid VLESS URL: %v", err)
 	}
-
 	uuid := u.User.Username()
 	if uuid == "" {
 		return nil, fmt.Errorf("VLESS URL missing UUID")
 	}
-
 	port := xrayPort
 	if p := u.Port(); p != "" {
-		if pInt, err2 := strconv.Atoi(p); err2 == nil {
+		if pInt, e := strconv.Atoi(p); e == nil {
 			port = pInt
 		}
 	}
-
 	q := u.Query()
 	network := q.Get("type")
 	if network == "" {
@@ -432,7 +419,6 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	pbk := q.Get("pbk")
 	sid := q.Get("sid")
 	spx := q.Get("spx")
-
 	user := map[string]interface{}{
 		"id":         uuid,
 		"encryption": "none",
@@ -441,7 +427,6 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	if flow != "" {
 		user["flow"] = flow
 	}
-
 	settings := map[string]interface{}{
 		"vnext": []interface{}{
 			map[string]interface{}{
@@ -451,13 +436,10 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 			},
 		},
 	}
-
-	streamSettings := buildStreamSettings(network, security, sni, fp, path, headerHost, allowInsecure, pbk, sid, spx)
-
 	return map[string]interface{}{
 		"protocol":       "vless",
 		"settings":       settings,
-		"streamSettings": streamSettings,
+		"streamSettings": buildStreamSettings(network, security, sni, fp, path, headerHost, allowInsecure, pbk, sid, spx),
 		"tag":            "proxy",
 	}, nil
 }
@@ -467,38 +449,33 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	if idx := strings.Index(encoded, "#"); idx != -1 {
 		encoded = encoded[:idx]
 	}
-
 	decoded, err := base64DecodeAny(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode VMess URL: %v", err)
 	}
-
 	var v map[string]interface{}
 	if err := json.Unmarshal(decoded, &v); err != nil {
 		return nil, fmt.Errorf("invalid VMess JSON: %v", err)
 	}
-
 	port := xrayPort
 	switch p := v["port"].(type) {
 	case float64:
 		port = int(p)
 	case string:
-		if pInt, err2 := strconv.Atoi(p); err2 == nil {
+		if pInt, e := strconv.Atoi(p); e == nil {
 			port = pInt
 		}
 	}
-
 	id, _ := v["id"].(string)
 	aid := 0
 	switch a := v["aid"].(type) {
 	case float64:
 		aid = int(a)
 	case string:
-		if aInt, err2 := strconv.Atoi(a); err2 == nil {
+		if aInt, e := strconv.Atoi(a); e == nil {
 			aid = aInt
 		}
 	}
-
 	security, _ := v["scy"].(string)
 	if security == "" {
 		security = "auto"
@@ -512,7 +489,6 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	fp, _ := v["fp"].(string)
 	path, _ := v["path"].(string)
 	headerHost, _ := v["host"].(string)
-
 	settings := map[string]interface{}{
 		"vnext": []interface{}{
 			map[string]interface{}{
@@ -529,13 +505,10 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 			},
 		},
 	}
-
-	streamSettings := buildStreamSettings(network, tlsSecurity, sni, fp, path, headerHost, false, "", "", "")
-
 	return map[string]interface{}{
 		"protocol":       "vmess",
 		"settings":       settings,
-		"streamSettings": streamSettings,
+		"streamSettings": buildStreamSettings(network, tlsSecurity, sni, fp, path, headerHost, false, "", "", ""),
 		"tag":            "proxy",
 	}, nil
 }
@@ -545,19 +518,16 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 	if err != nil {
 		return nil, fmt.Errorf("invalid Trojan URL: %v", err)
 	}
-
 	password := u.User.Username()
 	if password == "" {
 		return nil, fmt.Errorf("Trojan URL missing password")
 	}
-
 	port := xrayPort
 	if p := u.Port(); p != "" {
-		if pInt, err2 := strconv.Atoi(p); err2 == nil {
+		if pInt, e := strconv.Atoi(p); e == nil {
 			port = pInt
 		}
 	}
-
 	q := u.Query()
 	network := q.Get("type")
 	if network == "" {
@@ -578,7 +548,6 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 	pbk := q.Get("pbk")
 	sid := q.Get("sid")
 	spx := q.Get("spx")
-
 	settings := map[string]interface{}{
 		"servers": []interface{}{
 			map[string]interface{}{
@@ -589,13 +558,10 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 			},
 		},
 	}
-
-	streamSettings := buildStreamSettings(network, security, sni, fp, path, headerHost, allowInsecure, pbk, sid, spx)
-
 	return map[string]interface{}{
 		"protocol":       "trojan",
 		"settings":       settings,
-		"streamSettings": streamSettings,
+		"streamSettings": buildStreamSettings(network, security, sni, fp, path, headerHost, allowInsecure, pbk, sid, spx),
 		"tag":            "proxy",
 	}, nil
 }
@@ -603,7 +569,6 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 	var method, password string
 	port := xrayPort
-
 	u, parseErr := url.Parse(rawURL)
 	if parseErr == nil && u.Host != "" {
 		userInfo := u.User.String()
@@ -621,7 +586,7 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 			}
 		}
 		if p := u.Port(); p != "" {
-			if pInt, err2 := strconv.Atoi(p); err2 == nil {
+			if pInt, e := strconv.Atoi(p); e == nil {
 				port = pInt
 			}
 		}
@@ -648,16 +613,14 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 		}
 		hostParts := strings.SplitN(hostPart, ":", 2)
 		if len(hostParts) == 2 {
-			if pInt, err2 := strconv.Atoi(hostParts[1]); err2 == nil {
+			if pInt, e := strconv.Atoi(hostParts[1]); e == nil {
 				port = pInt
 			}
 		}
 	}
-
 	if method == "" {
 		return nil, fmt.Errorf("Shadowsocks URL: could not parse method/password")
 	}
-
 	settings := map[string]interface{}{
 		"servers": []interface{}{
 			map[string]interface{}{
@@ -669,7 +632,6 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 			},
 		},
 	}
-
 	return map[string]interface{}{
 		"protocol": "shadowsocks",
 		"settings": settings,
@@ -677,44 +639,8 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 	}, nil
 }
 
-func buildConfigFromURL(rawURL string, scanIP string, socksPort int) (string, *xraySocksInfo, error) {
-	socksInfo := &xraySocksInfo{Address: "127.0.0.1", Port: socksPort}
-
-	inbound := map[string]interface{}{
-		"protocol": "socks",
-		"listen":   "127.0.0.1",
-		"port":     float64(socksPort),
-		"settings": map[string]interface{}{
-			"auth": "noauth",
-			"udp":  false,
-		},
-	}
-
-	scheme := strings.ToLower(strings.SplitN(rawURL, "://", 2)[0])
-
-	var (
-		outbound map[string]interface{}
-		err      error
-	)
-
-	switch scheme {
-	case "vless":
-		outbound, err = parseVlessURL(rawURL, scanIP)
-	case "vmess":
-		outbound, err = parseVmessURL(rawURL, scanIP)
-	case "trojan":
-		outbound, err = parseTrojanURL(rawURL, scanIP)
-	case "ss", "shadowsocks":
-		outbound, err = parseSSURL(rawURL, scanIP)
-	default:
-		return "", nil, fmt.Errorf("unsupported URL scheme: %s", scheme)
-	}
-
-	if err != nil {
-		return "", nil, err
-	}
-
-	cfg := map[string]interface{}{
+func buildBaseConfig(inbound, outbound map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
 		"log": map[string]interface{}{"loglevel": "none"},
 		"inbounds": []interface{}{inbound},
 		"outbounds": []interface{}{
@@ -741,24 +667,59 @@ func buildConfigFromURL(rawURL string, scanIP string, socksPort int) (string, *x
 			},
 		},
 	}
+}
 
+func writeTempConfig(cfg map[string]interface{}) (string, error) {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to marshal config: %v", err)
+		return "", fmt.Errorf("failed to marshal config: %v", err)
 	}
-
 	tempFile, err := os.CreateTemp("", "xray_cfg_*.json")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp file: %v", err)
+		return "", fmt.Errorf("failed to create temp file: %v", err)
 	}
 	if _, err := tempFile.Write(data); err != nil {
 		tempFile.Close()
 		os.Remove(tempFile.Name())
-		return "", nil, fmt.Errorf("failed to write temp config: %v", err)
+		return "", fmt.Errorf("failed to write temp config: %v", err)
 	}
 	tempFile.Close()
+	return tempFile.Name(), nil
+}
 
-	return tempFile.Name(), socksInfo, nil
+func buildConfigFromURL(rawURL string, scanIP string, socksPort int) (string, *xraySocksInfo, error) {
+	socksInfo := &xraySocksInfo{Address: "127.0.0.1", Port: socksPort}
+	inbound := map[string]interface{}{
+		"protocol": "socks",
+		"listen":   "127.0.0.1",
+		"port":     float64(socksPort),
+		"settings": map[string]interface{}{"auth": "noauth", "udp": false},
+	}
+	scheme := strings.ToLower(strings.SplitN(rawURL, "://", 2)[0])
+	var (
+		outbound map[string]interface{}
+		err      error
+	)
+	switch scheme {
+	case "vless":
+		outbound, err = parseVlessURL(rawURL, scanIP)
+	case "vmess":
+		outbound, err = parseVmessURL(rawURL, scanIP)
+	case "trojan":
+		outbound, err = parseTrojanURL(rawURL, scanIP)
+	case "ss", "shadowsocks":
+		outbound, err = parseSSURL(rawURL, scanIP)
+	default:
+		return "", nil, fmt.Errorf("unsupported URL scheme: %s", scheme)
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	path, writeErr := writeTempConfig(buildBaseConfig(inbound, outbound))
+	if writeErr != nil {
+		return "", nil, writeErr
+	}
+	return path, socksInfo, nil
 }
 
 func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, error) {
@@ -766,7 +727,6 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 	if err != nil {
 		return "", nil, err
 	}
-
 	if isURL {
 		return buildConfigFromURL(content, ip, socksPort)
 	}
@@ -797,22 +757,16 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		if strings.ToLower(protocol) != "socks" {
 			continue
 		}
-
 		cleanInbound := map[string]interface{}{
 			"protocol": "socks",
 			"listen":   "127.0.0.1",
 			"port":     float64(socksPort),
-			"settings": map[string]interface{}{
-				"auth": "noauth",
-				"udp":  false,
-			},
+			"settings": map[string]interface{}{"auth": "noauth", "udp": false},
 		}
-
 		if listen, ok := inMap["listen"].(string); ok && listen != "" {
 			cleanInbound["listen"] = listen
 			socksInfo.Address = listen
 		}
-
 		if settings, ok := inMap["settings"].(map[string]interface{}); ok {
 			if auth, _ := settings["auth"].(string); auth == "password" {
 				if accounts, ok := settings["accounts"].([]interface{}); ok && len(accounts) > 0 {
@@ -826,10 +780,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 								"auth": "password",
 								"udp":  false,
 								"accounts": []interface{}{
-									map[string]interface{}{
-										"user": user,
-										"pass": pass,
-									},
+									map[string]interface{}{"user": user, "pass": pass},
 								},
 							}
 						}
@@ -837,11 +788,9 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 				}
 			}
 		}
-
 		newInbounds = append(newInbounds, cleanInbound)
 		break
 	}
-
 	if len(newInbounds) == 0 {
 		return "", nil, fmt.Errorf("no SOCKS inbound found in config")
 	}
@@ -855,12 +804,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		return "", nil, fmt.Errorf("'outbounds' is not an array")
 	}
 
-	skipProtocols := map[string]bool{
-		"freedom":   true,
-		"blackhole": true,
-		"dns":       true,
-	}
-
+	skipProtocols := map[string]bool{"freedom": true, "blackhole": true, "dns": true}
 	var proxyOutbound map[string]interface{}
 	outboundsByTag := make(map[string]map[string]interface{})
 
@@ -874,26 +818,22 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			outboundsByTag[tag] = outMap
 		}
 		protocol, _ := outMap["protocol"].(string)
-		protocol = strings.ToLower(protocol)
-		if !skipProtocols[protocol] && proxyOutbound == nil {
+		if !skipProtocols[strings.ToLower(protocol)] && proxyOutbound == nil {
 			proxyOutbound = outMap
 		}
 	}
-
 	if proxyOutbound == nil {
 		return "", nil, fmt.Errorf("no supported proxy outbound found in config")
 	}
 
 	protocol, _ := proxyOutbound["protocol"].(string)
-	protocol = strings.ToLower(protocol)
-
 	settings, ok := proxyOutbound["settings"].(map[string]interface{})
 	if !ok {
 		return "", nil, fmt.Errorf("proxy outbound has no 'settings' field")
 	}
 
 	ipUpdated := false
-	switch protocol {
+	switch strings.ToLower(protocol) {
 	case "vless", "vmess":
 		vnextRaw, ok := settings["vnext"]
 		if !ok {
@@ -912,7 +852,6 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		vnextSlice[0] = server
 		settings["vnext"] = vnextSlice
 		ipUpdated = true
-
 	case "trojan", "shadowsocks":
 		serversRaw, ok := settings["servers"]
 		if !ok {
@@ -932,7 +871,6 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		settings["servers"] = serversSlice
 		ipUpdated = true
 	}
-
 	if !ipUpdated {
 		return "", nil, fmt.Errorf("unsupported proxy protocol: %s", protocol)
 	}
@@ -942,14 +880,12 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		"settings": settings,
 		"tag":      "proxy",
 	}
-
 	var dialerProxyTag string
 	if ss, ok := proxyOutbound["streamSettings"].(map[string]interface{}); ok {
 		cleanedSS := cleanStreamSettings(ss)
 		cleanedProxy["streamSettings"] = cleanedSS
 		dialerProxyTag = getDialerProxy(cleanedProxy)
 	}
-
 	if mux, ok := proxyOutbound["mux"].(map[string]interface{}); ok {
 		if enabled, _ := mux["enabled"].(bool); !enabled {
 			cleanedProxy["mux"] = map[string]interface{}{"enabled": false}
@@ -965,13 +901,10 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		},
 		map[string]interface{}{
 			"protocol": "blackhole",
-			"settings": map[string]interface{}{
-				"response": map[string]interface{}{"type": "http"},
-			},
-			"tag": "block",
+			"settings": map[string]interface{}{"response": map[string]interface{}{"type": "http"}},
+			"tag":      "block",
 		},
 	}
-
 	if dialerProxyTag != "" {
 		if refOut, found := outboundsByTag[dialerProxyTag]; found {
 			cleanRef := map[string]interface{}{
@@ -989,10 +922,8 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 	}
 
 	cleanCfg := map[string]interface{}{
-		"log": map[string]interface{}{
-			"loglevel": "none",
-		},
-		"inbounds":  newInbounds,
+		"log":      map[string]interface{}{"loglevel": "none"},
+		"inbounds": newInbounds,
 		"outbounds": newOutbounds,
 		"routing": map[string]interface{}{
 			"domainStrategy": "AsIs",
@@ -1006,23 +937,11 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		},
 	}
 
-	newData, err := json.MarshalIndent(cleanCfg, "", "  ")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to marshal config: %v", err)
+	path, writeErr := writeTempConfig(cleanCfg)
+	if writeErr != nil {
+		return "", nil, writeErr
 	}
-
-	tempFile, err := os.CreateTemp("", "xray_cfg_*.json")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp file: %v", err)
-	}
-	if _, err := tempFile.Write(newData); err != nil {
-		tempFile.Close()
-		os.Remove(tempFile.Name())
-		return "", nil, fmt.Errorf("failed to write temp config: %v", err)
-	}
-	tempFile.Close()
-
-	return tempFile.Name(), socksInfo, nil
+	return path, socksInfo, nil
 }
 
 func createSocksDialer(socksInfo *xraySocksInfo) (proxy.Dialer, error) {
@@ -1050,9 +969,12 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
+		time.Sleep(150 * time.Millisecond)
 	}()
 
-	time.Sleep(xrayStartupDelay)
+	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
+		return
+	}
 
 	dialer, err := createSocksDialer(socksInfo)
 	if err != nil {
@@ -1073,19 +995,14 @@ func testIPViaXray(ip *net.IPAddr, socksPort int) (recv int, totalDelay time.Dur
 		},
 	}
 
-	for i := 0; i < xrayPingTimes; i++ {
-		start := time.Now()
-		resp, err := httpClient.Get("https://cp.cloudflare.com/generate_204")
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode == 200 || resp.StatusCode == 204 {
-				recv++
-				totalDelay += time.Since(start)
-			}
-		}
-		if i < xrayPingTimes-1 {
-			time.Sleep(xrayPingInterval)
+	start := time.Now()
+	resp, err := httpClient.Get("https://cp.cloudflare.com/generate_204")
+	if err == nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 200 || resp.StatusCode == 204 {
+			recv = 1
+			totalDelay = time.Since(start)
 		}
 	}
 	return
@@ -1101,7 +1018,7 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 	var mu sync.Mutex
 	total := len(ips)
 
-	color.New(color.FgCyan).Printf("Start latency test (Xray mode - %d attempts per IP, %d workers)\n", xrayPingTimes, xrayWorkerCount)
+	color.New(color.FgCyan).Printf("Start latency test (Xray mode - %d worker(s), timeout %v per IP)\n", xrayWorkerCount, xrayPingTimeout)
 	bar := newBar(total, "Available:", "")
 
 	ipChan := make(chan *net.IPAddr, total)
@@ -1120,26 +1037,22 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 		go func(workerID int) {
 			defer wg.Done()
 			socksPort := xrayPortBase + workerID
-
 			for ipAddr := range ipChan {
 				select {
 				case <-stopCh:
 					return
 				default:
 				}
-
 				recv, totalDelay := testIPViaXray(ipAddr, socksPort)
-
 				mu.Lock()
 				nowAble := len(results)
 				if recv > 0 {
 					nowAble++
-					avgDelay := totalDelay / time.Duration(recv)
 					results = append(results, PingResult{
 						IP:       ipAddr,
 						Sended:   xrayPingTimes,
 						Received: recv,
-						Delay:    avgDelay,
+						Delay:    totalDelay,
 					})
 				}
 				bar.grow(1, strconv.Itoa(nowAble))
@@ -1152,10 +1065,6 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr) []PingResult {
 	bar.done()
 
 	sort.Slice(results, func(i, j int) bool {
-		li, lj := results[i].GetLossRate(), results[j].GetLossRate()
-		if li != lj {
-			return li < lj
-		}
 		return results[i].Delay < results[j].Delay
 	})
 
@@ -1180,9 +1089,12 @@ func downloadSpeedViaXray(ip *net.IPAddr, socksPort int) float64 {
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
+		time.Sleep(150 * time.Millisecond)
 	}()
 
-	time.Sleep(xrayStartupDelay)
+	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
+		return 0.0
+	}
 
 	dialer, err := createSocksDialer(socksInfo)
 	if err != nil {
@@ -1274,7 +1186,7 @@ func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResu
 		barPadding += " "
 	}
 
-	color.New(color.FgCyan).Printf("Start download speed test (Xray mode, Minimum speed: %.2f MB/s, Number: %d, Queue: %d)\n", xrayMinSpeed, testCount, testNum)
+	color.New(color.FgCyan).Printf("Start download speed test (Xray mode, Number: %d, Queue: %d)\n", testCount, testNum)
 	bar := newBar(testCount, barPadding, "")
 
 	var results []IPResult
@@ -1286,23 +1198,19 @@ func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResu
 			goto done
 		default:
 		}
-
 		pr := pingResults[i]
 		speedMBps := downloadSpeedViaXray(pr.IP, speedPort)
-
-		if speedMBps >= xrayMinSpeed {
-			bar.grow(1, "")
-			results = append(results, IPResult{
-				IP:            pr.IP,
-				Sended:        pr.Sended,
-				Received:      pr.Received,
-				LossRate:      pr.GetLossRate(),
-				Delay:         int(pr.Delay.Milliseconds()),
-				DownloadSpeed: speedMBps * 1024 * 1024,
-			})
-			if len(results) == testCount {
-				break
-			}
+		bar.grow(1, "")
+		results = append(results, IPResult{
+			IP:            pr.IP,
+			Sended:        pr.Sended,
+			Received:      pr.Received,
+			LossRate:      pr.GetLossRate(),
+			Delay:         int(pr.Delay.Milliseconds()),
+			DownloadSpeed: speedMBps * 1024 * 1024,
+		})
+		if len(results) == testCount {
+			break
 		}
 	}
 
