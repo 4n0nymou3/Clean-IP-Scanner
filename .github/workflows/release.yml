@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 2.3.6)'
+        description: 'Release version (e.g., 3.0.0)'
         required: true
         type: string
       prerelease:
@@ -36,14 +36,14 @@ jobs:
           go mod download
           go mod tidy
 
-      - name: Build cf-scanner for Android ARM64
+      - name: Build clean-ip-scanner for Android ARM64
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o cf-scanner
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o clean-ip-scanner
 
       - name: Verify Go build
         run: |
-          file cf-scanner
-          ls -lh cf-scanner
+          file clean-ip-scanner
+          ls -lh clean-ip-scanner
 
       - name: Download Xray core latest stable (Android ARM64-v8a)
         run: |
@@ -170,9 +170,9 @@ jobs:
 
       - name: Create zip package
         run: |
-          zip -r cf-scanner-arm64.zip cf-scanner xray/ config/
-          echo "Created cf-scanner-arm64.zip"
-          ls -lh cf-scanner-arm64.zip
+          zip -r clean-ip-scanner-arm64.zip clean-ip-scanner xray/ config/
+          echo "Created clean-ip-scanner-arm64.zip"
+          ls -lh clean-ip-scanner-arm64.zip
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
@@ -180,22 +180,22 @@ jobs:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
-          files: cf-scanner-arm64.zip
+          files: clean-ip-scanner-arm64.zip
           body: |
-            ## CF Clean IP Scanner v${{ github.event.inputs.version }}
+            ## Clean IP Scanner v${{ github.event.inputs.version }}
             
-            **Cloudflare Clean IP Scanner for Termux (Android ARM64)**
+            **Clean IP Scanner for Termux (Android ARM64)**
             
             ### Installation (Direct Download)
             
             ```
-            pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/${{ github.repository }}/releases/latest/download/cf-scanner-arm64.zip && unzip cf-scanner-arm64.zip && chmod +x cf-scanner
+            pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/${{ github.repository }}/releases/latest/download/clean-ip-scanner-arm64.zip && unzip clean-ip-scanner-arm64.zip && chmod +x clean-ip-scanner
             ```
             
             Then run:
             
             ```
-            ./cf-scanner
+            ./clean-ip-scanner
             ```
             
             ### Installation (Build from Source with Xray)
@@ -207,7 +207,7 @@ jobs:
             ### Usage
             
             ```
-            cf-scanner
+            clean-ip-scanner
             ```
             
             Then choose: 1 for normal scan, 2 for Xray scan.
