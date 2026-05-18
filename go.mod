@@ -1,4 +1,4 @@
-module github.com/4n0nymou3/CF-Clean-IP-Scanner
+module github.com/4n0nymou3/Clean-IP-Scanner
 
 go 1.23
 
