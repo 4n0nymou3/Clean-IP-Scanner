@@ -27,6 +27,10 @@ if ! command -v unzip &> /dev/null; then
     echo "  → Installing unzip..."
     pkg install -y unzip
 fi
+if ! command -v jq &> /dev/null; then
+    echo "  → Installing jq..."
+    pkg install -y jq
+fi
 echo "✓ All packages ready"
 
 echo ""
@@ -51,22 +55,69 @@ echo "[4/6] Installing Xray core (latest stable for Android ARM64-v8a)..."
 if [ -f "./xray/xray" ]; then
     echo "  → Xray binary already present, skipping download."
 else
-    echo "  → Downloading Xray from GitHub..."
-    LATEST_TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d '"' -f 4)
-    if [ -z "$LATEST_TAG" ]; then
-        echo "✗ Could not determine latest Xray tag. Please check your internet connection."
-        exit 1
+    MAX_RETRIES=3
+    RETRY_COUNT=0
+
+    download_xray() {
+        echo "  → Fetching latest Xray version from GitHub API (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+
+        LATEST_URL=$(curl -sL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r '.assets[] | select(.name=="Xray-android-arm64-v8a.zip") | .browser_download_url')
+
+        if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" = "null" ]; then
+            echo "  → Could not get download URL from API"
+            return 1
+        fi
+
+        echo "  → Downloading from $LATEST_URL"
+        curl -L --retry 3 --retry-delay 5 -o xray-core.zip "$LATEST_URL" || { echo "  → Download failed"; return 1; }
+
+        if [ ! -f xray-core.zip ] || [ ! -s xray-core.zip ]; then
+            echo "  → Downloaded file is missing or empty"
+            return 1
+        fi
+
+        unzip -o xray-core.zip -d xray_temp || { echo "  → Unzip failed"; rm -f xray-core.zip; return 1; }
+        mkdir -p xray
+        cp xray_temp/xray xray/
+        chmod +x xray/xray
+        rm -rf xray_temp xray-core.zip
+        return 0
+    }
+
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if download_xray; then
+            echo "✓ Xray core installed"
+            break
+        else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "  → Retrying in 15 seconds..."
+                sleep 15
+            fi
+        fi
+    done
+
+    if [ ! -f "./xray/xray" ]; then
+        echo ""
+        echo "  → Auto-detection failed. Trying fallback version..."
+        FALLBACK_VERSION="v25.3.6"
+        FALLBACK_URL="https://github.com/XTLS/Xray-core/releases/download/${FALLBACK_VERSION}/Xray-android-arm64-v8a.zip"
+        echo "  → Downloading $FALLBACK_VERSION from $FALLBACK_URL"
+
+        if curl -L --retry 3 -o xray-core.zip "$FALLBACK_URL" && \
+           unzip -o xray-core.zip -d xray_temp && \
+           mkdir -p xray && \
+           cp xray_temp/xray xray/ && \
+           chmod +x xray/xray; then
+            rm -rf xray_temp xray-core.zip
+            echo "✓ Xray core installed (fallback version $FALLBACK_VERSION)"
+        else
+            rm -rf xray_temp xray-core.zip
+            echo "✗ Failed to install Xray core. Please check your internet connection."
+            exit 1
+        fi
     fi
-    DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_TAG}/Xray-android-arm64-v8a.zip"
-    echo "  → Downloading from $DOWNLOAD_URL"
-    curl -L -o xray-core.zip "$DOWNLOAD_URL" || { echo "✗ Failed to download Xray"; exit 1; }
-    unzip -o xray-core.zip -d xray_temp || { echo "✗ Failed to unzip Xray"; exit 1; }
-    mkdir -p xray
-    cp xray_temp/xray xray/
-    chmod +x xray/xray
-    rm -rf xray_temp xray-core.zip
 fi
-echo "✓ Xray core installed"
 
 echo ""
 echo "[5/6] Setting up Xray config files..."
