@@ -9,8 +9,8 @@ import (
 func PrintHeader() {
 	cyan := color.New(color.FgCyan, color.Bold)
 	cyan.Println("=================================================")
-	cyan.Println("          CLOUDFLARE CLEAN IP SCANNER")
-	cyan.Println("          Find the fastest Cloudflare IPs")
+	cyan.Println("              CLEAN IP SCANNER")
+	cyan.Println("          Find the fastest clean IPs")
 	cyan.Println("=================================================")
 }
 
