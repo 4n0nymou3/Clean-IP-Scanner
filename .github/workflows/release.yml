@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.0.0)'
+        description: 'Release version (e.g., 3.1.0)'
         required: true
         type: string
       prerelease:
@@ -100,7 +100,7 @@ jobs:
           done
 
           echo "Trying fallback with hardcoded version..."
-          FALLBACK_VERSION="v26.3.27"
+          FALLBACK_VERSION="v25.3.6"
           FALLBACK_URL="https://github.com/XTLS/Xray-core/releases/download/${FALLBACK_VERSION}/Xray-android-arm64-v8a.zip"
           echo "Using fallback URL: $FALLBACK_URL"
 
@@ -189,7 +189,7 @@ jobs:
             ### Installation (Direct Download)
             
             ```
-            pkg update && pkg upgrade && pkg install wget unzip && wget https://github.com/${{ github.repository }}/releases/latest/download/clean-ip-scanner-arm64.zip && unzip clean-ip-scanner-arm64.zip && chmod +x clean-ip-scanner
+            pkg update && pkg upgrade -y && pkg install -y wget unzip && wget https://github.com/${{ github.repository }}/releases/latest/download/clean-ip-scanner-arm64.zip && unzip clean-ip-scanner-arm64.zip && chmod +x clean-ip-scanner
             ```
             
             Then run:
@@ -213,6 +213,13 @@ jobs:
             Then choose: 1 for normal scan, 2 for Xray scan.
             
             Press Ctrl+C to stop and see results.
+            
+            ### What's New in v3.1.0
+            
+            - Xray scan: worker count is now configurable (1-16) at runtime
+            - Resume interrupted scans: progress is saved automatically every 100 IPs
+            - On next launch, you are asked whether to resume or start fresh
+            - Works for both Normal and Xray scan modes
             
             ### Xray Mode Configuration
             
