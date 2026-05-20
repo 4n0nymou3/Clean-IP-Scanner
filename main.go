@@ -18,7 +18,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.1.0"
+const version = "3.1.1"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -248,11 +248,18 @@ func main() {
 		var scanIPs []*net.IPAddr
 
 		if resuming && cp != nil {
-			scanIPs = cp.GetRemainingIPs()
+			color.New(color.FgCyan).Println("Rebuilding IP list from saved seed...")
+			allIPs := scanner.GenerateIPsWithSeed(ipRanges, cp.Seed)
+			start := cp.ProgressIndex
+			if start >= len(allIPs) {
+				start = len(allIPs)
+			}
+			scanIPs = allIPs[start:]
 			color.New(color.FgCyan).Printf("Resuming ping phase: %d of %d IPs remaining\n\n", len(scanIPs), cp.TotalIPs)
 		} else {
-			scanIPs = scanner.GenerateIPs(ipRanges)
-			cp = scanner.NewCheckpoint(mode, workers, scanIPs)
+			allIPs, seed := scanner.GenerateIPs(ipRanges)
+			scanIPs = allIPs
+			cp = scanner.NewCheckpoint(mode, workers, len(allIPs), seed)
 			cp.Save()
 			fmt.Println()
 		}
