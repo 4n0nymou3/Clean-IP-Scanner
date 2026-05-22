@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -17,7 +18,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.2.0"
+const version = "3.2.1"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -43,6 +44,14 @@ func printScanStats(elapsed time.Duration, interrupted bool) {
 	fmt.Println()
 	color.New(color.FgCyan).Printf("  Scan Duration : %s\n", formatDuration(elapsed))
 	fmt.Println()
+}
+
+func getIPRangesPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "./config/ip_ranges.txt"
+	}
+	return filepath.Join(filepath.Dir(exe), "config", "ip_ranges.txt")
 }
 
 func askScanMode() int {
@@ -142,6 +151,8 @@ func main() {
 	color.New(color.FgYellow).Println("Press Ctrl+C at any time to stop and see results found so far.")
 	fmt.Println()
 
+	ipRangesPath := getIPRangesPath()
+
 	var (
 		mode          int
 		workers       int
@@ -151,8 +162,21 @@ func main() {
 		skipPingPhase bool
 	)
 
-	existingCP := scanner.LoadCheckpoint()
-	if existingCP != nil {
+	existingCP, loadResult := scanner.LoadCheckpointChecked(ipRangesPath)
+
+	if loadResult == scanner.LoadResultHashChanged {
+		fmt.Println()
+		color.New(color.FgYellow, color.Bold).Println("+-------------------------------------------------+")
+		color.New(color.FgYellow, color.Bold).Println("|         PREVIOUS SCAN INVALIDATED               |")
+		color.New(color.FgYellow, color.Bold).Println("+-------------------------------------------------+")
+		fmt.Println()
+		color.New(color.FgYellow).Println("  The IP list (ip_ranges.txt) has changed since the last scan.")
+		color.New(color.FgYellow).Println("  The previous checkpoint is no longer valid and has been removed.")
+		color.New(color.FgCyan).Println("  Starting a new scan with the updated IP list.")
+		fmt.Println()
+	}
+
+	if loadResult == scanner.LoadResultOK && existingCP != nil {
 		fmt.Println()
 		color.New(color.FgYellow, color.Bold).Println("+-------------------------------------------------+")
 		color.New(color.FgYellow, color.Bold).Println("|         UNFINISHED SCAN DETECTED                |")
@@ -258,7 +282,9 @@ func main() {
 		} else {
 			allIPs, seed := scanner.GenerateIPs(ipRanges)
 			scanIPs = allIPs
-			cp = scanner.NewCheckpoint(mode, workers, len(allIPs), seed)
+
+			ipRangesHash, _ := scanner.ComputeFileHash(ipRangesPath)
+			cp = scanner.NewCheckpoint(mode, workers, len(allIPs), seed, ipRangesHash)
 			cp.Save()
 			fmt.Println()
 		}
