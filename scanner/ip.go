@@ -8,20 +8,49 @@ import (
 	"time"
 )
 
+type CompactIP [16]byte
+
+func compactFromNetIP(ip net.IP) CompactIP {
+	var c CompactIP
+	ip16 := ip.To16()
+	if ip16 != nil {
+		copy(c[:], ip16)
+	}
+	return c
+}
+
+func (c CompactIP) ToNetIPAddr() *net.IPAddr {
+	ip := make(net.IP, 16)
+	copy(ip, c[:])
+	if ip4 := ip.To4(); ip4 != nil {
+		return &net.IPAddr{IP: ip4}
+	}
+	return &net.IPAddr{IP: ip}
+}
+
+func (c CompactIP) String() string {
+	ip := make(net.IP, 16)
+	copy(ip, c[:])
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.String()
+	}
+	return ip.String()
+}
+
 type IPRanges struct {
-	ips  []*net.IPAddr
+	ips  []CompactIP
 	seen map[string]bool
 }
 
 func newIPRanges() *IPRanges {
 	return &IPRanges{
-		ips:  make([]*net.IPAddr, 0),
+		ips:  make([]CompactIP, 0),
 		seen: make(map[string]bool),
 	}
 }
 
 func (r *IPRanges) appendIP(ip net.IP) {
-	r.ips = append(r.ips, &net.IPAddr{IP: ip})
+	r.ips = append(r.ips, compactFromNetIP(ip))
 }
 
 func (r *IPRanges) expandCIDR(cidr string) {
@@ -29,19 +58,16 @@ func (r *IPRanges) expandCIDR(cidr string) {
 	if cidr == "" {
 		return
 	}
-
 	_, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		fmt.Printf("ParseCIDR error for %s: %v\n", cidr, err)
 		return
 	}
-
 	networkKey := ipNet.String()
 	if r.seen[networkKey] {
 		return
 	}
 	r.seen[networkKey] = true
-
 	ip := cloneIP(ipNet.IP)
 	for ipNet.Contains(ip) {
 		clone := make(net.IP, len(ip))
@@ -89,7 +115,7 @@ func buildIPRanges(ranges []string) *IPRanges {
 	return ipRanges
 }
 
-func GenerateIPs(ranges []string) ([]*net.IPAddr, int64) {
+func GenerateIPs(ranges []string) ([]CompactIP, int64) {
 	seed := time.Now().UnixNano()
 	ipRanges := buildIPRanges(ranges)
 	rng := rand.New(rand.NewSource(seed))
@@ -99,7 +125,7 @@ func GenerateIPs(ranges []string) ([]*net.IPAddr, int64) {
 	return ipRanges.ips, seed
 }
 
-func GenerateIPsWithSeed(ranges []string, seed int64) []*net.IPAddr {
+func GenerateIPsWithSeed(ranges []string, seed int64) []CompactIP {
 	ipRanges := buildIPRanges(ranges)
 	rng := rand.New(rand.NewSource(seed))
 	rng.Shuffle(len(ipRanges.ips), func(i, j int) {
