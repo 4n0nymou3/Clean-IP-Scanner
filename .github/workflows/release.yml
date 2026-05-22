@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.2.1)'
+        description: 'Release version (e.g., 3.2.0)'
         required: true
         type: string
       prerelease:
@@ -214,11 +214,13 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.2.1
+            ### What's New in v3.2.0
             
-            - IP list integrity check: if ip_ranges.txt changes between sessions, the previous checkpoint is automatically invalidated and removed — no silent incorrect resume
-            - A clear message is shown explaining why the previous scan was invalidated
-            - All features from v3.2.0 are retained (CompactIP memory optimization, IPv6 support, resume, configurable workers)
+            - Memory usage reduced by 3x for large IP lists
+            - Full IPv6 support: IPv6 ranges can now be added to ip_ranges.txt
+            - Each IP now uses only 16 bytes of RAM (down from ~50 bytes)
+            - 30 million IPs now require ~480 MB RAM instead of ~1.5 GB
+            - All previous features from v3.1.x are retained
             
             ### Xray Mode Configuration
             
