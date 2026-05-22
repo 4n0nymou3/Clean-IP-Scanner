@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	checkpointFile      = "scan_checkpoint.json"
-	saveIntervalMode1   = 2000
-	saveIntervalMode2   = 500
+	checkpointFile    = "scan_checkpoint.json"
+	saveIntervalMode1 = 2000
+	saveIntervalMode2 = 500
 )
 
 type CheckpointPhase string
