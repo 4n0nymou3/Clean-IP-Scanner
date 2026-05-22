@@ -2,8 +2,6 @@ package scanner
 
 import (
 	"encoding/json"
-	"hash/fnv"
-	"io"
 	"net"
 	"os"
 	"sync"
@@ -32,42 +30,27 @@ type cpPingResult struct {
 }
 
 type Checkpoint struct {
-	Mode           int             `json:"mode"`
-	Workers        int             `json:"workers"`
-	Phase          CheckpointPhase `json:"phase"`
-	Completed      bool            `json:"completed"`
-	ProgressIndex  int             `json:"progress_index"`
-	TotalIPs       int             `json:"total_ips"`
-	Seed           int64           `json:"seed"`
-	IPRangesHash   uint64          `json:"ip_ranges_hash"`
-	PingResults    []cpPingResult  `json:"ping_results"`
-	SavedAt        string          `json:"saved_at"`
+	Mode          int             `json:"mode"`
+	Workers       int             `json:"workers"`
+	Phase         CheckpointPhase `json:"phase"`
+	Completed     bool            `json:"completed"`
+	ProgressIndex int             `json:"progress_index"`
+	TotalIPs      int             `json:"total_ips"`
+	Seed          int64           `json:"seed"`
+	PingResults   []cpPingResult  `json:"ping_results"`
+	SavedAt       string          `json:"saved_at"`
 }
 
 var asyncSaveMu sync.Mutex
 var asyncSaveRunning bool
 
-func ComputeFileHash(path string) (uint64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	h := fnv.New64a()
-	if _, err := io.Copy(h, f); err != nil {
-		return 0, err
-	}
-	return h.Sum64(), nil
-}
-
-func NewCheckpoint(mode, workers int, totalIPs int, seed int64, ipRangesHash uint64) *Checkpoint {
+func NewCheckpoint(mode, workers int, totalIPs int, seed int64) *Checkpoint {
 	return &Checkpoint{
-		Mode:         mode,
-		Workers:      workers,
-		Phase:        PhasePing,
-		TotalIPs:     totalIPs,
-		Seed:         seed,
-		IPRangesHash: ipRangesHash,
+		Mode:     mode,
+		Workers:  workers,
+		Phase:    PhasePing,
+		TotalIPs: totalIPs,
+		Seed:     seed,
 	}
 }
 
@@ -148,47 +131,19 @@ func (c *Checkpoint) MarkCompleted() {
 	c.save()
 }
 
-type LoadResult int
-
-const (
-	LoadResultNone        LoadResult = iota
-	LoadResultOK
-	LoadResultHashChanged
-)
-
-func LoadCheckpointChecked(ipRangesPath string) (*Checkpoint, LoadResult) {
+func LoadCheckpoint() *Checkpoint {
 	data, err := os.ReadFile(checkpointFile)
 	if err != nil {
-		return nil, LoadResultNone
+		return nil
 	}
-
 	var cp Checkpoint
 	if err := json.Unmarshal(data, &cp); err != nil {
-		os.Remove(checkpointFile)
-		return nil, LoadResultNone
+		return nil
 	}
-
 	if cp.Completed || cp.TotalIPs == 0 || cp.Seed == 0 {
-		return nil, LoadResultNone
+		return nil
 	}
-
-	currentHash, err := ComputeFileHash(ipRangesPath)
-	if err != nil {
-		return &cp, LoadResultOK
-	}
-
-	if cp.IPRangesHash != 0 && currentHash != cp.IPRangesHash {
-		os.Remove(checkpointFile)
-		os.Remove(checkpointFile + ".tmp")
-		return nil, LoadResultHashChanged
-	}
-
-	return &cp, LoadResultOK
-}
-
-func LoadCheckpoint() *Checkpoint {
-	cp, _ := LoadCheckpointChecked("")
-	return cp
+	return &cp
 }
 
 func DeleteCheckpoint() {
