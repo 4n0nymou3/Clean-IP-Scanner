@@ -56,7 +56,7 @@ func checkConnection(ip *net.IPAddr) (recv int, totalDelay time.Duration) {
 	return
 }
 
-func PingIPs(stopCh <-chan struct{}, ips []*net.IPAddr, cp *Checkpoint, existingResults []PingResult) []PingResult {
+func PingIPs(stopCh <-chan struct{}, ips []CompactIP, cp *Checkpoint, existingResults []PingResult) []PingResult {
 	var results []PingResult
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -76,7 +76,7 @@ func PingIPs(stopCh <-chan struct{}, ips []*net.IPAddr, cp *Checkpoint, existing
 
 	bar := newBar(total, "Available:", "")
 
-	for _, ip := range ips {
+	for _, cip := range ips {
 		select {
 		case <-stopCh:
 			goto done
@@ -84,10 +84,11 @@ func PingIPs(stopCh <-chan struct{}, ips []*net.IPAddr, cp *Checkpoint, existing
 		}
 
 		wg.Add(1)
-		go func(ipAddr *net.IPAddr) {
+		go func(compIP CompactIP) {
 			defer wg.Done()
 			defer func() { <-control }()
 
+			ipAddr := compIP.ToNetIPAddr()
 			recv, totalDelay := checkConnection(ipAddr)
 
 			mu.Lock()
@@ -116,7 +117,7 @@ func PingIPs(stopCh <-chan struct{}, ips []*net.IPAddr, cp *Checkpoint, existing
 				cpCopy.SaveAsync()
 			}
 			mu.Unlock()
-		}(ip)
+		}(cip)
 	}
 
 done:
