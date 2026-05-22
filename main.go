@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -18,7 +17,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.1.1"
+const version = "3.2.0"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -245,7 +244,7 @@ func main() {
 		pingResults = existingPRs
 	} else {
 		ipRanges := config.GetCloudflareRanges()
-		var scanIPs []*net.IPAddr
+		var scanIPs []scanner.CompactIP
 
 		if resuming && cp != nil {
 			color.New(color.FgCyan).Println("Rebuilding IP list from saved seed...")
