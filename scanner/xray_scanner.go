@@ -61,19 +61,11 @@ var xrayDiagFirstStderr string
 var xrayFirstFailures []xrayFailReason
 
 var allowedStreamFields = map[string]bool{
-	"network":             true,
-	"security":            true,
-	"tlsSettings":         true,
-	"realitySettings":     true,
-	"wsSettings":          true,
-	"grpcSettings":        true,
-	"tcpSettings":         true,
-	"httpSettings":        true,
-	"quicSettings":        true,
-	"dsSettings":          true,
-	"httpupgradeSettings": true,
-	"splithttpSettings":   true,
-	"sockopt":             true,
+	"network": true, "security": true, "tlsSettings": true,
+	"realitySettings": true, "wsSettings": true, "grpcSettings": true,
+	"tcpSettings": true, "httpSettings": true, "quicSettings": true,
+	"dsSettings": true, "httpupgradeSettings": true, "splithttpSettings": true,
+	"sockopt": true,
 }
 
 var urlPlaceholders = []string{
@@ -511,9 +503,7 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	sid := q.Get("sid")
 	spx := q.Get("spx")
 	user := map[string]interface{}{
-		"id":         uuid,
-		"encryption": "none",
-		"level":      float64(8),
+		"id": uuid, "encryption": "none", "level": float64(8),
 	}
 	if flow != "" {
 		user["flow"] = flow
@@ -521,9 +511,8 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	settings := map[string]interface{}{
 		"vnext": []interface{}{
 			map[string]interface{}{
-				"address": scanIP,
-				"port":    float64(p),
-				"users":   []interface{}{user},
+				"address": scanIP, "port": float64(p),
+				"users": []interface{}{user},
 			},
 		},
 	}
@@ -583,14 +572,11 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	settings := map[string]interface{}{
 		"vnext": []interface{}{
 			map[string]interface{}{
-				"address": scanIP,
-				"port":    float64(p),
+				"address": scanIP, "port": float64(p),
 				"users": []interface{}{
 					map[string]interface{}{
-						"id":       id,
-						"alterId":  float64(aid),
-						"security": security,
-						"level":    float64(8),
+						"id": id, "alterId": float64(aid),
+						"security": security, "level": float64(8),
 					},
 				},
 			},
@@ -642,10 +628,8 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 	settings := map[string]interface{}{
 		"servers": []interface{}{
 			map[string]interface{}{
-				"address":  scanIP,
-				"port":     float64(p),
-				"password": password,
-				"level":    float64(8),
+				"address": scanIP, "port": float64(p),
+				"password": password, "level": float64(8),
 			},
 		},
 	}
@@ -715,24 +699,19 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 	settings := map[string]interface{}{
 		"servers": []interface{}{
 			map[string]interface{}{
-				"address":  scanIP,
-				"port":     float64(p),
-				"method":   method,
-				"password": password,
-				"level":    float64(8),
+				"address": scanIP, "port": float64(p),
+				"method": method, "password": password, "level": float64(8),
 			},
 		},
 	}
 	return map[string]interface{}{
-		"protocol": "shadowsocks",
-		"settings": settings,
-		"tag":      "proxy",
+		"protocol": "shadowsocks", "settings": settings, "tag": "proxy",
 	}, nil
 }
 
 func buildBaseConfig(inbound, outbound map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
-		"log":      map[string]interface{}{"loglevel": "none"},
+		"log": map[string]interface{}{"loglevel": "none"},
 		"inbounds": []interface{}{inbound},
 		"outbounds": []interface{}{
 			outbound,
@@ -767,9 +746,7 @@ func writeTempConfig(cfg map[string]interface{}) (string, error) {
 func buildConfigFromURL(rawURL string, scanIP string, socksPort int) (string, *xraySocksInfo, error) {
 	socksInfo := &xraySocksInfo{Address: "127.0.0.1", Port: socksPort}
 	inbound := map[string]interface{}{
-		"protocol": "socks",
-		"listen":   "127.0.0.1",
-		"port":     float64(socksPort),
+		"protocol": "socks", "listen": "127.0.0.1", "port": float64(socksPort),
 		"settings": map[string]interface{}{"auth": "noauth", "udp": false},
 	}
 	scheme := strings.ToLower(strings.SplitN(rawURL, "://", 2)[0])
@@ -831,9 +808,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			continue
 		}
 		cleanInbound := map[string]interface{}{
-			"protocol": "socks",
-			"listen":   "127.0.0.1",
-			"port":     float64(socksPort),
+			"protocol": "socks", "listen": "127.0.0.1", "port": float64(socksPort),
 			"settings": map[string]interface{}{"auth": "noauth", "udp": false},
 		}
 		if listen, ok := inMap["listen"].(string); ok && listen != "" {
@@ -850,11 +825,8 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 							socksInfo.User = user
 							socksInfo.Pass = pass
 							cleanInbound["settings"] = map[string]interface{}{
-								"auth": "password",
-								"udp":  false,
-								"accounts": []interface{}{
-									map[string]interface{}{"user": user, "pass": pass},
-								},
+								"auth": "password", "udp": false,
+								"accounts": []interface{}{map[string]interface{}{"user": user, "pass": pass}},
 							}
 						}
 					}
@@ -941,9 +913,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		return "", nil, fmt.Errorf("unsupported proxy protocol: %s", protocol)
 	}
 	cleanedProxy := map[string]interface{}{
-		"protocol": proxyOutbound["protocol"],
-		"settings": settings,
-		"tag":      "proxy",
+		"protocol": proxyOutbound["protocol"], "settings": settings, "tag": "proxy",
 	}
 	var dialerProxyTag string
 	if ss, ok := proxyOutbound["streamSettings"].(map[string]interface{}); ok {
@@ -974,9 +944,8 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		}
 	}
 	cleanCfg := map[string]interface{}{
-		"log":      map[string]interface{}{"loglevel": "none"},
-		"inbounds": newInbounds,
-		"outbounds": newOutbounds,
+		"log": map[string]interface{}{"loglevel": "none"},
+		"inbounds": newInbounds, "outbounds": newOutbounds,
 		"routing": map[string]interface{}{
 			"domainStrategy": "AsIs",
 			"rules":          []interface{}{map[string]interface{}{"type": "field", "outboundTag": "proxy", "network": "tcp,udp"}},
@@ -1111,7 +1080,7 @@ func testIPViaXray(ip *net.IPAddr) (recv int, totalDelay time.Duration) {
 	return
 }
 
-func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr, workers int, cp *Checkpoint, existingResults []PingResult) []PingResult {
+func PingIPsViaXray(stopCh <-chan struct{}, ips []CompactIP, workers int, cp *Checkpoint, existingResults []PingResult) []PingResult {
 	if _, err := os.Stat("./xray/xray"); os.IsNotExist(err) {
 		color.New(color.FgRed).Println("ERROR: Core binary not found at ./xray/xray")
 		return nil
@@ -1127,12 +1096,12 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr, workers int, cp *
 	}
 	color.New(color.FgCyan).Printf("Start latency test (Xray mode - %d workers, timeout %v per IP)\n", workers, xrayPingTimeout)
 	bar := newBar(total, "Available:", "")
-	ipChan := make(chan *net.IPAddr, total)
-	for _, ip := range ips {
+	ipChan := make(chan CompactIP, total)
+	for _, cip := range ips {
 		select {
 		case <-stopCh:
 		default:
-			ipChan <- ip
+			ipChan <- cip
 		}
 	}
 	close(ipChan)
@@ -1141,12 +1110,13 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []*net.IPAddr, workers int, cp *
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for ipAddr := range ipChan {
+			for compIP := range ipChan {
 				select {
 				case <-stopCh:
 					return
 				default:
 				}
+				ipAddr := compIP.ToNetIPAddr()
 				recv, totalDelay := testIPViaXray(ipAddr)
 				mu.Lock()
 				processedCount++
