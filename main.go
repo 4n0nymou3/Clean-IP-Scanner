@@ -17,7 +17,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.2.0"
+const version = "3.3.0"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -261,6 +261,14 @@ func main() {
 			cp = scanner.NewCheckpoint(mode, workers, len(allIPs), seed)
 			cp.Save()
 			fmt.Println()
+		}
+
+		if len(scanIPs) == 0 {
+			color.New(color.FgRed, color.Bold).Println("No IPs to scan!")
+			fmt.Println()
+			color.New(color.FgYellow).Println("Check config/ip_ranges.txt — all entries may have been skipped.")
+			color.New(color.FgYellow).Println("For IPv6, use subnets of /108 or smaller (e.g., 2606:4700::/108).")
+			os.Exit(1)
 		}
 
 		var newPingResults []scanner.PingResult
