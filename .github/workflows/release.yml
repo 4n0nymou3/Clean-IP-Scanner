@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.2.0)'
+        description: 'Release version (e.g., 3.3.0)'
         required: true
         type: string
       prerelease:
@@ -214,19 +214,23 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.2.0
+            ### What's New in v3.3.0
             
-            - Memory usage reduced by 3x for large IP lists
-            - Full IPv6 support: IPv6 ranges can now be added to ip_ranges.txt
-            - Each IP now uses only 16 bytes of RAM (down from ~50 bytes)
-            - 30 million IPs now require ~480 MB RAM instead of ~1.5 GB
-            - All previous features from v3.1.x are retained
+            - Fixed IPv6 crash: large IPv6 CIDR ranges (e.g. /32) no longer crash Termux
+            - Any CIDR that expands to more than 5 million IPs is now safely skipped with a clear error message
+            - For IPv6, use subnets of /108 or smaller (e.g. 2606:4700::/108)
+            - All features from v3.2.0 are retained
+            
+            ### IPv6 Usage Note
+            
+            IPv6 ranges with large prefixes like /32 contain billions of addresses and cannot be scanned one-by-one.
+            Use small subnets like /120 or /112 for IPv6, or stick to IPv4 ranges for large-scale scanning.
             
             ### Xray Mode Configuration
             
             Edit **one** of these files with your config:
-            - **URL format** → `config/xray_config.txt` (paste your vless:// / vmess:// / trojan:// / ss:// link)
-            - **JSON format** → `config/xray_config.json` (paste your full Xray JSON config)
+            - **URL format** → `config/xray_config.txt`
+            - **JSON format** → `config/xray_config.json`
             
             ---
             Made with love for Iranian users
