@@ -100,7 +100,7 @@ else
     if [ ! -f "./xray/xray" ]; then
         echo ""
         echo "  → Auto-detection failed. Trying fallback version..."
-        FALLBACK_VERSION="v25.3.6"
+        FALLBACK_VERSION="v26.3.27"
         FALLBACK_URL="https://github.com/XTLS/Xray-core/releases/download/${FALLBACK_VERSION}/Xray-android-arm64-v8a.zip"
         echo "  → Downloading $FALLBACK_VERSION from $FALLBACK_URL"
 
