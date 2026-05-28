@@ -100,7 +100,7 @@ else
     if [ ! -f "./xray/xray" ]; then
         echo ""
         echo "  → Auto-detection failed. Trying fallback version..."
-        FALLBACK_VERSION="v26.3.27"
+        FALLBACK_VERSION="v25.3.6"
         FALLBACK_URL="https://github.com/XTLS/Xray-core/releases/download/${FALLBACK_VERSION}/Xray-android-arm64-v8a.zip"
         echo "  → Downloading $FALLBACK_VERSION from $FALLBACK_URL"
 
@@ -184,7 +184,7 @@ fi
 echo ""
 echo "[6/6] Building clean-ip-scanner..."
 echo "  (This may take 1-2 minutes...)"
-CGO_ENABLED=0 go build -ldflags="-s -w" -o clean-ip-scanner || { echo "✗ Build failed"; exit 1; }
+CGO_ENABLED=0 go build -buildmode=pie -ldflags="-s -w" -o clean-ip-scanner || { echo "✗ Build failed"; exit 1; }
 if [ ! -f "clean-ip-scanner" ]; then
     echo "✗ Build failed - executable not created"
     exit 1
