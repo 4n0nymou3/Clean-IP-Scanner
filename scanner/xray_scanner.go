@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	xrayBufferSize        = 1024
+	xrayBufferSize        = 32768
 	xrayDownloadURL       = "https://speed.cloudflare.com/__down?bytes=52428800"
 	xrayDownloadTimeout   = 15 * time.Second
 	xrayTestNum           = 10
@@ -977,8 +977,10 @@ func makeTestHTTPClient(socksInfo *xraySocksInfo, timeout time.Duration) (*http.
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dialer.Dial(network, addr)
 			},
-			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
-			DisableKeepAlives: true,
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			DisableKeepAlives:     true,
 		},
 		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -1221,24 +1223,23 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 		if currentTime.After(timeEnd) {
 			break
 		}
-		n, err := response.Body.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				break
-			}
-			if response.ContentLength == -1 {
-				break
-			}
-			lastSlice := timeStart.Add(timeSlice * time.Duration(timeCounter-1))
-			if currentTime.After(lastSlice) {
-				ratio := float64(currentTime.Sub(lastSlice)) / float64(timeSlice)
-				if ratio > 0 {
-					e.Add(float64(contentRead-lastContentRead) / ratio)
+		n, readErr := response.Body.Read(buffer)
+		contentRead += int64(n)
+		if readErr != nil {
+			if readErr == io.EOF {
+				lastSlice := timeStart.Add(timeSlice * time.Duration(timeCounter - 1))
+				now := time.Now()
+				elapsed := float64(now.Sub(lastSlice))
+				sliceDuration := float64(timeSlice)
+				if elapsed > 0 && sliceDuration > 0 {
+					ratio := elapsed / sliceDuration
+					if ratio > 0 {
+						e.Add(float64(contentRead-lastContentRead) / ratio)
+					}
 				}
 			}
 			break
 		}
-		contentRead += int64(n)
 	}
 	avgBytesPerSec := e.Value() * 100 / xrayDownloadTimeout.Seconds()
 	return avgBytesPerSec / (1024 * 1024)
