@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	bufferSize      = 1024
+	bufferSize      = 32768
 	downloadURL     = "https://speed.cloudflare.com/__down?bytes=52428800"
 	downloadTimeout = 10 * time.Second
 	defaultTestNum  = 10
@@ -32,29 +33,32 @@ type IPResult struct {
 }
 
 func getDialContext(ip *net.IPAddr) func(ctx context.Context, network, address string) (net.Conn, error) {
-	var fakeSourceAddr string
+	var targetAddr string
 	if isIPv4(ip.String()) {
-		fakeSourceAddr = fmt.Sprintf("%s:%d", ip.String(), port)
+		targetAddr = fmt.Sprintf("%s:%d", ip.String(), port)
 	} else {
-		fakeSourceAddr = fmt.Sprintf("[%s]:%d", ip.String(), port)
+		targetAddr = fmt.Sprintf("[%s]:%d", ip.String(), port)
 	}
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, fakeSourceAddr)
+		return (&net.Dialer{
+			Timeout: downloadTimeout,
+		}).DialContext(ctx, network, targetAddr)
 	}
 }
 
 func downloadHandler(ip *net.IPAddr) float64 {
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: getDialContext(ip),
+			DialContext:           getDialContext(ip),
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			DisableKeepAlives:     true,
 		},
 		Timeout: downloadTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 10 {
 				return http.ErrUseLastResponse
-			}
-			if req.Header.Get("Referer") == downloadURL {
-				req.Header.Del("Referer")
 			}
 			return nil
 		},
@@ -78,20 +82,19 @@ func downloadHandler(ip *net.IPAddr) float64 {
 
 	timeStart := time.Now()
 	timeEnd := timeStart.Add(downloadTimeout)
-	contentLength := response.ContentLength
 	buffer := make([]byte, bufferSize)
 
 	var (
 		contentRead     int64 = 0
+		lastContentRead int64 = 0
 		timeSlice             = downloadTimeout / 100
 		timeCounter           = 1
-		lastContentRead int64 = 0
 	)
 
 	nextTime := timeStart.Add(timeSlice * time.Duration(timeCounter))
 	e := ewma.NewMovingAverage()
 
-	for contentLength != contentRead {
+	for {
 		currentTime := time.Now()
 		if currentTime.After(nextTime) {
 			timeCounter++
@@ -102,20 +105,26 @@ func downloadHandler(ip *net.IPAddr) float64 {
 		if currentTime.After(timeEnd) {
 			break
 		}
-		n, err := response.Body.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				break
-			} else if contentLength == -1 {
-				break
-			}
-			lastSlice := timeStart.Add(timeSlice * time.Duration(timeCounter-1))
-			e.Add(float64(contentRead-lastContentRead) / (float64(currentTime.Sub(lastSlice)) / float64(timeSlice)))
-		}
+		n, readErr := response.Body.Read(buffer)
 		contentRead += int64(n)
+		if readErr != nil {
+			if readErr == io.EOF {
+				lastSlice := timeStart.Add(timeSlice * time.Duration(timeCounter - 1))
+				now := time.Now()
+				elapsed := float64(now.Sub(lastSlice))
+				sliceDuration := float64(timeSlice)
+				if elapsed > 0 && sliceDuration > 0 {
+					ratio := elapsed / sliceDuration
+					if ratio > 0 {
+						e.Add(float64(contentRead-lastContentRead) / ratio)
+					}
+				}
+			}
+			break
+		}
 	}
 
-	return e.Value() / (downloadTimeout.Seconds() / 120)
+	return e.Value() * 100 / downloadTimeout.Seconds()
 }
 
 func SpeedTest(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
