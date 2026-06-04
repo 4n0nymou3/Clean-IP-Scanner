@@ -972,21 +972,44 @@ func makeTestHTTPClient(socksInfo *xraySocksInfo, timeout time.Duration) (*http.
 	if err != nil {
 		return nil, err
 	}
-	return &http.Client{
+	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if cd, ok := dialer.(interface {
+			DialContext(context.Context, string, string) (net.Conn, error)
+		}); ok {
+			return cd.DialContext(ctx, network, addr)
+		}
+		type connResult struct {
+			conn net.Conn
+			err  error
+		}
+		ch := make(chan connResult, 1)
+		go func() {
+			conn, e := dialer.Dial(network, addr)
+			ch <- connResult{conn, e}
+		}()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case r := <-ch:
+			return r.conn, r.err
+		}
+	}
+	c := &http.Client{
 		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
-			},
+			DialContext:           dialFunc,
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
 			DisableKeepAlives:     true,
 		},
-		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}, nil
+	}
+	if timeout > 0 {
+		c.Timeout = timeout
+	}
+	return c, nil
 }
 
 func SelfTestXray() error {
@@ -1186,7 +1209,7 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
 		return 0.0
 	}
-	httpClient, err := makeTestHTTPClient(socksInfo, xrayDownloadTimeout)
+	httpClient, err := makeTestHTTPClient(socksInfo, 0)
 	if err != nil {
 		return 0.0
 	}
@@ -1195,6 +1218,9 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 		return 0.0
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
+	dlCtx, dlCancel := context.WithTimeout(context.Background(), xrayDownloadTimeout+xrayPingTimeout)
+	defer dlCancel()
+	req = req.WithContext(dlCtx)
 	response, err := httpClient.Do(req)
 	if err != nil {
 		return 0.0
