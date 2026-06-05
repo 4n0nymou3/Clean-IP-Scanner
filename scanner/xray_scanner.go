@@ -20,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/VividCortex/ewma"
 	"github.com/fatih/color"
 	"golang.org/x/net/proxy"
 )
@@ -1160,89 +1159,8 @@ func PingIPsViaXray(stopCh <-chan struct{}, ips []CompactIP, workers int, cp *Ch
 }
 
 func downloadSpeedViaXray(ip *net.IPAddr) float64 {
-	socksPort, err := findFreePort()
-	if err != nil {
-		return 0.0
-	}
-	configPath, socksInfo, err := createTempConfigWithIP(ip.String(), socksPort)
-	if err != nil {
-		return 0.0
-	}
-	defer os.Remove(configPath)
-	cmd := exec.Command("./xray/xray", "run", "-c", configPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return 0.0
-	}
-	defer func() {
-		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			cmd.Wait()
-		}
-		time.Sleep(xrayKillSleep)
-	}()
-	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
-		return 0.0
-	}
-	httpClient, err := makeTestHTTPClient(socksInfo, xrayDownloadTimeout*3)
-	if err != nil {
-		return 0.0
-	}
-	req, err := http.NewRequest("GET", xrayDownloadURL, nil)
-	if err != nil {
-		return 0.0
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
-	response, err := httpClient.Do(req)
-	if err != nil {
-		return 0.0
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return 0.0
-	}
-	timeStart := time.Now()
-	timeEnd := timeStart.Add(xrayDownloadTimeout)
-	buffer := make([]byte, xrayBufferSize)
-	var contentRead int64 = 0
-	var lastContentRead int64 = 0
-	timeSlice := xrayDownloadTimeout / 100
-	timeCounter := 1
-	nextTime := timeStart.Add(timeSlice * time.Duration(timeCounter))
-	e := ewma.NewMovingAverage()
-	for {
-		currentTime := time.Now()
-		if currentTime.After(nextTime) {
-			timeCounter++
-			nextTime = timeStart.Add(timeSlice * time.Duration(timeCounter))
-			e.Add(float64(contentRead - lastContentRead))
-			lastContentRead = contentRead
-		}
-		if currentTime.After(timeEnd) {
-			break
-		}
-		n, readErr := response.Body.Read(buffer)
-		contentRead += int64(n)
-		if readErr != nil {
-			if readErr == io.EOF {
-				lastSlice := timeStart.Add(timeSlice * time.Duration(timeCounter - 1))
-				now := time.Now()
-				elapsed := float64(now.Sub(lastSlice))
-				sliceDuration := float64(timeSlice)
-				if elapsed > 0 && sliceDuration > 0 {
-					ratio := elapsed / sliceDuration
-					if ratio > 0 {
-						e.Add(float64(contentRead-lastContentRead) / ratio)
-					}
-				}
-			}
-			break
-		}
-	}
-	avgBytesPerSec := e.Value() * 100 / xrayDownloadTimeout.Seconds()
-	return avgBytesPerSec / (1024 * 1024)
+	bytesPerSec := downloadHandler(ip)
+	return bytesPerSec / (1024 * 1024)
 }
 
 func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
