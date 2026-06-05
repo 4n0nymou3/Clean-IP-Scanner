@@ -27,7 +27,7 @@ import (
 
 const (
 	xrayBufferSize        = 32768
-	xrayDownloadURL       = "https://speed.cloudflare.com/__down?bytes=52428800"
+	xrayDownloadURL       = "https://speed.hetzner.de/100MB.bin"
 	xrayDownloadTimeout   = 15 * time.Second
 	xrayTestNum           = 10
 	xrayPort              = 443
@@ -972,44 +972,21 @@ func makeTestHTTPClient(socksInfo *xraySocksInfo, timeout time.Duration) (*http.
 	if err != nil {
 		return nil, err
 	}
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if cd, ok := dialer.(interface {
-			DialContext(context.Context, string, string) (net.Conn, error)
-		}); ok {
-			return cd.DialContext(ctx, network, addr)
-		}
-		type connResult struct {
-			conn net.Conn
-			err  error
-		}
-		ch := make(chan connResult, 1)
-		go func() {
-			conn, e := dialer.Dial(network, addr)
-			ch <- connResult{conn, e}
-		}()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case r := <-ch:
-			return r.conn, r.err
-		}
-	}
-	c := &http.Client{
+	return &http.Client{
 		Transport: &http.Transport{
-			DialContext:           dialFunc,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
 			DisableKeepAlives:     true,
 		},
+		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
-	if timeout > 0 {
-		c.Timeout = timeout
-	}
-	return c, nil
+	}, nil
 }
 
 func SelfTestXray() error {
@@ -1209,7 +1186,7 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 	if err := waitForSocksReady(socksPort, xraySocksReadyTimeout); err != nil {
 		return 0.0
 	}
-	httpClient, err := makeTestHTTPClient(socksInfo, 0)
+	httpClient, err := makeTestHTTPClient(socksInfo, xrayDownloadTimeout*3)
 	if err != nil {
 		return 0.0
 	}
@@ -1218,9 +1195,6 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 		return 0.0
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
-	dlCtx, dlCancel := context.WithTimeout(context.Background(), xrayDownloadTimeout+xrayPingTimeout)
-	defer dlCancel()
-	req = req.WithContext(dlCtx)
 	response, err := httpClient.Do(req)
 	if err != nil {
 		return 0.0
