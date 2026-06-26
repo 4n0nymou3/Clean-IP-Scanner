@@ -294,13 +294,14 @@ func validateJSONConfig(content string) error {
 			continue
 		}
 		proto, _ := inMap["protocol"].(string)
-		if strings.ToLower(proto) == "socks" {
+		proto = strings.ToLower(proto)
+		if proto == "socks" || proto == "mixed" {
 			hasSocks = true
 			break
 		}
 	}
 	if !hasSocks {
-		return fmt.Errorf("config has no SOCKS inbound — please add a socks inbound")
+		return fmt.Errorf("config has no socks or mixed inbound — please add a socks or mixed inbound")
 	}
 	outboundsRaw, ok := cfg["outbounds"]
 	if !ok {
@@ -803,11 +804,12 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			continue
 		}
 		protocol, _ := inMap["protocol"].(string)
-		if strings.ToLower(protocol) != "socks" {
+		protocol = strings.ToLower(protocol)
+		if protocol != "socks" && protocol != "mixed" {
 			continue
 		}
 		cleanInbound := map[string]interface{}{
-			"protocol": "socks", "listen": "127.0.0.1", "port": float64(socksPort),
+			"protocol": protocol, "listen": "127.0.0.1", "port": float64(socksPort),
 			"settings": map[string]interface{}{"auth": "noauth", "udp": false},
 		}
 		if listen, ok := inMap["listen"].(string); ok && listen != "" {
@@ -836,7 +838,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		break
 	}
 	if len(newInbounds) == 0 {
-		return "", nil, fmt.Errorf("no SOCKS inbound found in config")
+		return "", nil, fmt.Errorf("no socks or mixed inbound found in config")
 	}
 	outboundsRaw, ok := cfg["outbounds"]
 	if !ok {
@@ -943,7 +945,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		}
 	}
 	cleanCfg := map[string]interface{}{
-		"log": map[string]interface{}{"loglevel": "none"},
+		"log":      map[string]interface{}{"loglevel": "none"},
 		"inbounds": newInbounds, "outbounds": newOutbounds,
 		"routing": map[string]interface{}{
 			"domainStrategy": "AsIs",
