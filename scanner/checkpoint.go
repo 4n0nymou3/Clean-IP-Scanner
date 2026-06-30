@@ -32,6 +32,7 @@ type cpPingResult struct {
 type Checkpoint struct {
 	Mode          int             `json:"mode"`
 	Workers       int             `json:"workers"`
+	Port          int             `json:"port"`
 	Phase         CheckpointPhase `json:"phase"`
 	Completed     bool            `json:"completed"`
 	ProgressIndex int             `json:"progress_index"`
@@ -44,10 +45,11 @@ type Checkpoint struct {
 var asyncSaveMu sync.Mutex
 var asyncSaveRunning bool
 
-func NewCheckpoint(mode, workers int, totalIPs int, seed int64) *Checkpoint {
+func NewCheckpoint(mode, workers, port int, totalIPs int, seed int64) *Checkpoint {
 	return &Checkpoint{
 		Mode:     mode,
 		Workers:  workers,
+		Port:     port,
 		Phase:    PhasePing,
 		TotalIPs: totalIPs,
 		Seed:     seed,
