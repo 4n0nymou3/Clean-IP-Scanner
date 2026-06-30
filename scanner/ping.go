@@ -13,10 +13,20 @@ import (
 
 const (
 	tcpConnectTimeout = 1 * time.Second
-	port              = 443
+	defaultPort       = 443
 	maxRoutines       = 200
 	defaultPingTimes  = 4
 )
+
+var port = defaultPort
+
+func SetPort(p int) {
+	if p <= 0 || p > 65535 {
+		port = defaultPort
+		return
+	}
+	port = p
+}
 
 type PingResult struct {
 	IP       *net.IPAddr
