@@ -17,7 +17,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.4.0"
+const version = "3.5.0"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -113,6 +113,28 @@ func askWorkerCount() int {
 	}
 }
 
+func askCustomPort() int {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Println()
+		color.New(color.FgCyan, color.Bold).Println("Enter scan port:")
+		color.New(color.FgWhite).Println("  Press Enter to use the default port (443)")
+		color.New(color.FgWhite).Println("  Or enter a custom port (1-65535) to scan on instead")
+		fmt.Print("Port: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return 0
+		}
+		n, err := strconv.Atoi(input)
+		if err != nil || n < 1 || n > 65535 {
+			color.New(color.FgRed).Println("Invalid input. Please enter a number between 1 and 65535.")
+			continue
+		}
+		return n
+	}
+}
+
 func askResumeOrNew() bool {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -145,6 +167,7 @@ func main() {
 	var (
 		mode          int
 		workers       int
+		scanPort      int
 		cp            *scanner.Checkpoint
 		resuming      bool
 		existingPRs   []scanner.PingResult
@@ -183,6 +206,7 @@ func main() {
 			cp = existingCP
 			mode = cp.Mode
 			workers = cp.Workers
+			scanPort = cp.Port
 			existingPRs = cp.GetPingResults()
 			skipPingPhase = cp.Phase == scanner.PhaseSpeed
 			fmt.Println()
@@ -199,7 +223,11 @@ func main() {
 		if mode == 2 {
 			workers = askWorkerCount()
 		}
+		scanPort = askCustomPort()
 	}
+
+	scanner.SetPort(scanPort)
+	scanner.SetXrayOverridePort(scanPort)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -258,7 +286,7 @@ func main() {
 		} else {
 			allIPs, seed := scanner.GenerateIPs(ipRanges)
 			scanIPs = allIPs
-			cp = scanner.NewCheckpoint(mode, workers, len(allIPs), seed)
+			cp = scanner.NewCheckpoint(mode, workers, scanPort, len(allIPs), seed)
 			cp.Save()
 			fmt.Println()
 		}
