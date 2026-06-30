@@ -38,6 +38,16 @@ const (
 	xrayKillSleep         = 200 * time.Millisecond
 )
 
+var xrayOverridePort = 0
+
+func SetXrayOverridePort(p int) {
+	if p <= 0 || p > 65535 {
+		xrayOverridePort = 0
+		return
+	}
+	xrayOverridePort = p
+}
+
 type xraySocksInfo struct {
 	Address string
 	Port    int
@@ -484,6 +494,9 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 			p = pInt
 		}
 	}
+	if xrayOverridePort != 0 {
+		p = xrayOverridePort
+	}
 	q := u.Query()
 	network := q.Get("type")
 	if network == "" {
@@ -546,6 +559,9 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 			p = pInt
 		}
 	}
+	if xrayOverridePort != 0 {
+		p = xrayOverridePort
+	}
 	id, _ := v["id"].(string)
 	aid := 0
 	switch a := v["aid"].(type) {
@@ -604,6 +620,9 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 		if pInt, e := strconv.Atoi(ps); e == nil {
 			p = pInt
 		}
+	}
+	if xrayOverridePort != 0 {
+		p = xrayOverridePort
 	}
 	q := u.Query()
 	network := q.Get("type")
@@ -692,6 +711,9 @@ func parseSSURL(rawURL string, scanIP string) (map[string]interface{}, error) {
 				p = pInt
 			}
 		}
+	}
+	if xrayOverridePort != 0 {
+		p = xrayOverridePort
 	}
 	if method == "" {
 		return nil, fmt.Errorf("config: could not parse method/password")
@@ -889,6 +911,9 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			return "", nil, fmt.Errorf("outbound server entry is invalid")
 		}
 		server["address"] = ip
+		if xrayOverridePort != 0 {
+			server["port"] = float64(xrayOverridePort)
+		}
 		vnextSlice[0] = server
 		settings["vnext"] = vnextSlice
 		ipUpdated = true
@@ -906,6 +931,9 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 			return "", nil, fmt.Errorf("outbound server entry is invalid")
 		}
 		server["address"] = ip
+		if xrayOverridePort != 0 {
+			server["port"] = float64(xrayOverridePort)
+		}
 		serversSlice[0] = server
 		settings["servers"] = serversSlice
 		ipUpdated = true
