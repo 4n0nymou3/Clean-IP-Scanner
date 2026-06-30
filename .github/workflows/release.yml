@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.4.0)'
+        description: 'Release version (e.g., 3.5.0)'
         required: true
         type: string
       prerelease:
@@ -214,17 +214,12 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.3.0
+            ### What's New in v3.5.0
             
-            - Fixed IPv6 crash: large IPv6 CIDR ranges (e.g. /32) no longer crash Termux
-            - Any CIDR that expands to more than 5 million IPs is now safely skipped with a clear error message
-            - For IPv6, use subnets of /108 or smaller (e.g. 2606:4700::/108)
-            - All features from v3.2.0 are retained
-            
-            ### IPv6 Usage Note
-            
-            IPv6 ranges with large prefixes like /32 contain billions of addresses and cannot be scanned one-by-one.
-            Use small subnets like /120 or /112 for IPv6, or stick to IPv4 ranges for large-scale scanning.
+            - Custom port selection: enter any port (1-65535) before each scan
+            - Default port remains 443 if no port is entered
+            - Custom port applies to both Normal scan (TCP) and Xray scan modes
+            - Chosen port is saved in scan checkpoint and restored on resume
             
             ### Xray Mode Configuration
             
