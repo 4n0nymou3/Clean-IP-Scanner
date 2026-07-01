@@ -48,6 +48,69 @@ func SetXrayOverridePort(p int) {
 	xrayOverridePort = p
 }
 
+var xrayTLSPorts = map[int]bool{
+	443:  true,
+	2053: true,
+	2083: true,
+	2087: true,
+	2096: true,
+	8443: true,
+}
+
+var xrayNonTLSPorts = map[int]bool{
+	80:   true,
+	8080: true,
+	8880: true,
+	2052: true,
+	2082: true,
+	2086: true,
+	2095: true,
+}
+
+func adjustSecurityForPort(security string, p int) string {
+	if xrayOverridePort == 0 {
+		return security
+	}
+	normalized := strings.ToLower(strings.TrimSpace(security))
+	if normalized != "" && normalized != "tls" && normalized != "none" {
+		return security
+	}
+	if xrayTLSPorts[p] {
+		return "tls"
+	}
+	if xrayNonTLSPorts[p] {
+		return "none"
+	}
+	return security
+}
+
+func adjustStreamSettingsSecurity(ss map[string]interface{}, protocol string, p int) map[string]interface{} {
+	if ss == nil {
+		return ss
+	}
+	lowerProtocol := strings.ToLower(protocol)
+	if lowerProtocol != "vless" && lowerProtocol != "vmess" && lowerProtocol != "trojan" {
+		return ss
+	}
+	currentSecurity, _ := ss["security"].(string)
+	newSecurity := adjustSecurityForPort(currentSecurity, p)
+	if strings.ToLower(newSecurity) == strings.ToLower(currentSecurity) {
+		return ss
+	}
+	if strings.ToLower(newSecurity) == "none" {
+		delete(ss, "tlsSettings")
+		delete(ss, "realitySettings")
+		ss["security"] = "none"
+	} else if strings.ToLower(newSecurity) == "tls" {
+		if _, ok := ss["tlsSettings"].(map[string]interface{}); !ok {
+			ss["tlsSettings"] = map[string]interface{}{"allowInsecure": true}
+		}
+		delete(ss, "realitySettings")
+		ss["security"] = "tls"
+	}
+	return ss
+}
+
 type xraySocksInfo struct {
 	Address string
 	Port    int
@@ -503,6 +566,7 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 		network = "tcp"
 	}
 	security := q.Get("security")
+	security = adjustSecurityForPort(security, p)
 	sni := q.Get("sni")
 	if sni == "" {
 		sni = q.Get("peer")
@@ -511,6 +575,9 @@ func parseVlessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 	path, _ := url.QueryUnescape(q.Get("path"))
 	headerHost := q.Get("host")
 	flow := q.Get("flow")
+	if strings.ToLower(security) != "tls" && strings.ToLower(security) != "reality" {
+		flow = ""
+	}
 	allowInsecure := q.Get("allowInsecure") == "1" || q.Get("insecure") == "1"
 	pbk := q.Get("pbk")
 	sid := q.Get("sid")
@@ -581,6 +648,7 @@ func parseVmessURL(rawURL string, scanIP string) (map[string]interface{}, error)
 		network = "tcp"
 	}
 	tlsSecurity, _ := v["tls"].(string)
+	tlsSecurity = adjustSecurityForPort(tlsSecurity, p)
 	sni, _ := v["sni"].(string)
 	fp, _ := v["fp"].(string)
 	path, _ := v["path"].(string)
@@ -633,6 +701,7 @@ func parseTrojanURL(rawURL string, scanIP string) (map[string]interface{}, error
 	if security == "" {
 		security = "tls"
 	}
+	security = adjustSecurityForPort(security, p)
 	sni := q.Get("sni")
 	if sni == "" {
 		sni = q.Get("peer")
@@ -914,6 +983,22 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 		if xrayOverridePort != 0 {
 			server["port"] = float64(xrayOverridePort)
 		}
+		if strings.ToLower(protocol) == "vless" {
+			finalSecurity := ""
+			if ss, ok := proxyOutbound["streamSettings"].(map[string]interface{}); ok {
+				currentSecurity, _ := ss["security"].(string)
+				finalSecurity = adjustSecurityForPort(currentSecurity, xrayOverridePort)
+			}
+			if strings.ToLower(finalSecurity) != "tls" && strings.ToLower(finalSecurity) != "reality" {
+				if usersRaw, ok := server["users"].([]interface{}); ok {
+					for _, uRaw := range usersRaw {
+						if um, ok := uRaw.(map[string]interface{}); ok {
+							delete(um, "flow")
+						}
+					}
+				}
+			}
+		}
 		vnextSlice[0] = server
 		settings["vnext"] = vnextSlice
 		ipUpdated = true
@@ -947,6 +1032,7 @@ func createTempConfigWithIP(ip string, socksPort int) (string, *xraySocksInfo, e
 	var dialerProxyTag string
 	if ss, ok := proxyOutbound["streamSettings"].(map[string]interface{}); ok {
 		cleanedSS := cleanStreamSettings(ss)
+		cleanedSS = adjustStreamSettingsSecurity(cleanedSS, protocol, xrayOverridePort)
 		cleanedProxy["streamSettings"] = cleanedSS
 		dialerProxyTag = getDialerProxy(cleanedProxy)
 	}
