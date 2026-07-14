@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.5.1)'
+        description: 'Release version (e.g., 3.5.2)'
         required: true
         type: string
       prerelease:
@@ -214,7 +214,7 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.5.1
+            ### What's New in v3.5.2
             
             - Custom port selection: enter any port (1-65535) before each scan
             - Default port remains 443 if no port is entered
