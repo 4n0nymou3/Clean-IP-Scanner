@@ -16,6 +16,6 @@ func PrintHeader() {
 
 func PrintDesigner() {
 	green := color.New(color.FgGreen, color.Bold)
-	green.Println("...:..::.::: Designed by: Anonymous :::.::..:...")
+	green.Println("...:..::.::: Engineered by: Anonymous :::.::..:...")
 	fmt.Println()
 }
