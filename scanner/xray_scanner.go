@@ -1279,6 +1279,11 @@ func downloadSpeedViaXray(ip *net.IPAddr) float64 {
 	return bytesPerSec / (1024 * 1024)
 }
 
+func uploadSpeedViaXray(ip *net.IPAddr) float64 {
+	bytesPerSec := uploadHandler(ip)
+	return bytesPerSec / (1024 * 1024)
+}
+
 func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
 	testCount := xrayTestNum
 	testNum := testCount
@@ -1290,7 +1295,7 @@ func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResu
 	for i := 0; i < len(strconv.Itoa(len(pingResults))); i++ {
 		barPadding += " "
 	}
-	color.New(color.FgCyan).Printf("Start download speed test (Xray mode, Number: %d, Queue: %d)\n", testCount, testNum)
+	color.New(color.FgCyan).Printf("Start download & upload speed test (Xray mode, Number: %d, Queue: %d)\n", testCount, testNum)
 	bar := newBar(testCount, barPadding, "")
 	var results []IPResult
 	for i := 0; i < testNum; i++ {
@@ -1300,7 +1305,8 @@ func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResu
 		default:
 		}
 		pr := pingResults[i]
-		speedMBps := downloadSpeedViaXray(pr.IP)
+		downloadMBps := downloadSpeedViaXray(pr.IP)
+		uploadMBps := uploadSpeedViaXray(pr.IP)
 		bar.grow(1, "")
 		results = append(results, IPResult{
 			IP:            pr.IP,
@@ -1308,7 +1314,8 @@ func SpeedTestViaXray(stopCh <-chan struct{}, pingResults []PingResult) []IPResu
 			Received:      pr.Received,
 			LossRate:      pr.GetLossRate(),
 			Delay:         int(pr.Delay.Milliseconds()),
-			DownloadSpeed: speedMBps * 1024 * 1024,
+			DownloadSpeed: downloadMBps * 1024 * 1024,
+			UploadSpeed:   uploadMBps * 1024 * 1024,
 		})
 		if len(results) == testCount {
 			break
@@ -1318,7 +1325,7 @@ done:
 	bar.done()
 	if len(results) > 0 {
 		sort.Slice(results, func(i, j int) bool {
-			return results[i].DownloadSpeed > results[j].DownloadSpeed
+			return results[i].DownloadSpeed+results[i].UploadSpeed > results[j].DownloadSpeed+results[j].UploadSpeed
 		})
 	}
 	fmt.Println()
