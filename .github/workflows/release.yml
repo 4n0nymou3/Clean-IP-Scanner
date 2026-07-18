@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.5.2)'
+        description: 'Release version (e.g., 3.6.0)'
         required: true
         type: string
       prerelease:
@@ -214,12 +214,14 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.5.2
+            ### What's New in v3.6.0
             
-            - Custom port selection: enter any port (1-65535) before each scan
-            - Default port remains 443 if no port is entered
-            - Custom port applies to both Normal scan (TCP) and Xray scan modes
-            - Chosen port is saved in scan checkpoint and restored on resume
+            - Added real upload speed testing alongside the existing download speed test
+            - Every candidate IP is now tested for both download AND upload throughput using Cloudflare's speed test endpoints
+            - Results are now ranked by combined download + upload speed instead of download speed alone
+            - Upload speed is displayed next to download speed in the terminal results table
+            - Upload speed is also included in `clean_ips.txt` for every saved result
+            - Works in both Normal scan (TCP) and Xray scan modes
             
             ### Xray Mode Configuration
             
