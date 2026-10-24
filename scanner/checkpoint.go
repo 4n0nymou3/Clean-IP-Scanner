@@ -24,6 +24,7 @@ const (
 
 type cpPingResult struct {
 	IP       string `json:"ip"`
+	Port     int    `json:"port,omitempty"`
 	Sended   int    `json:"sended"`
 	Received int    `json:"received"`
 	DelayMs  int64  `json:"delay_ms"`
@@ -33,6 +34,7 @@ type Checkpoint struct {
 	Mode          int             `json:"mode"`
 	Workers       int             `json:"workers"`
 	Port          int             `json:"port"`
+	Ports         []int           `json:"ports,omitempty"`
 	Phase         CheckpointPhase `json:"phase"`
 	Completed     bool            `json:"completed"`
 	ProgressIndex int             `json:"progress_index"`
@@ -45,15 +47,37 @@ type Checkpoint struct {
 var asyncSaveMu sync.Mutex
 var asyncSaveRunning bool
 
-func NewCheckpoint(mode, workers, port int, totalIPs int, seed int64) *Checkpoint {
-	return &Checkpoint{
+func NewCheckpoint(mode, workers int, ports []int, totalIPs int, seed int64) *Checkpoint {
+	cp := &Checkpoint{
 		Mode:     mode,
 		Workers:  workers,
-		Port:     port,
 		Phase:    PhasePing,
 		TotalIPs: totalIPs,
 		Seed:     seed,
 	}
+	cp.Ports = append([]int(nil), ports...)
+	if len(ports) == 1 {
+		cp.Port = ports[0]
+	}
+	return cp
+}
+
+func (c *Checkpoint) GetPorts() []int {
+	if len(c.Ports) > 0 {
+		return normalizePorts(c.Ports)
+	}
+	if c.Port > 0 {
+		return normalizePorts([]int{c.Port})
+	}
+	return nil
+}
+
+func (c *Checkpoint) UniqueIPCount() int {
+	seen := make(map[string]bool, len(c.PingResults))
+	for _, r := range c.PingResults {
+		seen[r.IP] = true
+	}
+	return len(seen)
 }
 
 func (c *Checkpoint) SetPingResults(results []PingResult) {
@@ -61,6 +85,7 @@ func (c *Checkpoint) SetPingResults(results []PingResult) {
 	for i, r := range results {
 		c.PingResults[i] = cpPingResult{
 			IP:       r.IP.String(),
+			Port:     r.Port,
 			Sended:   r.Sended,
 			Received: r.Received,
 			DelayMs:  r.Delay.Milliseconds(),
@@ -70,13 +95,22 @@ func (c *Checkpoint) SetPingResults(results []PingResult) {
 
 func (c *Checkpoint) GetPingResults() []PingResult {
 	results := make([]PingResult, 0, len(c.PingResults))
+	fallbackPort := 0
+	if ports := c.GetPorts(); len(ports) == 1 {
+		fallbackPort = ports[0]
+	}
 	for _, r := range c.PingResults {
 		ipAddr, err := net.ResolveIPAddr("ip", r.IP)
 		if err != nil {
 			continue
 		}
+		resultPort := r.Port
+		if resultPort == 0 {
+			resultPort = fallbackPort
+		}
 		results = append(results, PingResult{
 			IP:       ipAddr,
+			Port:     resultPort,
 			Sended:   r.Sended,
 			Received: r.Received,
 			Delay:    time.Duration(r.DelayMs) * time.Millisecond,
