@@ -17,7 +17,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "3.6.1"
+const version = "4.0.0"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -115,25 +115,29 @@ func askWorkerCount() int {
 	}
 }
 
-func askCustomPort() int {
+func askScanPorts() []int {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Println()
-		color.New(color.FgCyan, color.Bold).Println("Enter scan port:")
+		color.New(color.FgCyan, color.Bold).Println("Enter scan port(s):")
 		color.New(color.FgWhite).Println("  Press Enter to use the default port (443)")
-		color.New(color.FgWhite).Println("  Or enter a custom port (1-65535) to scan on instead")
-		fmt.Print("Port: ")
+		color.New(color.FgWhite).Printf("  Or enter 1 to %d ports (1-65535), separated by commas\n", scanner.MaxPorts)
+		color.New(color.FgWhite).Println("  Example: 443,8443,2053")
+		fmt.Print("Port(s): ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 		if input == "" {
-			return 0
+			return nil
 		}
-		n, err := strconv.Atoi(input)
-		if err != nil || n < 1 || n > 65535 {
-			color.New(color.FgRed).Println("Invalid input. Please enter a number between 1 and 65535.")
+		ports, duplicates, err := scanner.ParsePorts(input)
+		if err != nil {
+			color.New(color.FgRed).Println("Invalid input: " + err.Error())
 			continue
 		}
-		return n
+		if duplicates {
+			color.New(color.FgYellow).Println("Duplicate ports were removed.")
+		}
+		return ports
 	}
 }
 
@@ -169,7 +173,7 @@ func main() {
 	var (
 		mode          int
 		workers       int
-		scanPort      int
+		scanPorts     []int
 		cp            *scanner.Checkpoint
 		resuming      bool
 		existingPRs   []scanner.PingResult
@@ -194,6 +198,8 @@ func main() {
 		scanned := existingCP.ProgressIndex
 		total := existingCP.TotalIPs
 		found := len(existingCP.PingResults)
+		cpPorts := existingCP.GetPorts()
+		cpMulti := len(cpPorts) > 1
 		pct := 0
 		if total > 0 {
 			pct = scanned * 100 / total
@@ -201,7 +207,12 @@ func main() {
 
 		color.New(color.FgCyan).Printf("  Previous scan mode : %s\n", modeStr)
 		color.New(color.FgCyan).Printf("  Progress           : %d / %d IPs (%d%%)\n", scanned, total, pct)
-		color.New(color.FgCyan).Printf("  Responsive IPs     : %d found so far\n", found)
+		if cpMulti {
+			color.New(color.FgCyan).Printf("  Ports              : %d ports\n", len(cpPorts))
+			color.New(color.FgCyan).Printf("  Responsive IP:Port : %d found so far (%d unique IPs)\n", found, existingCP.UniqueIPCount())
+		} else {
+			color.New(color.FgCyan).Printf("  Responsive IPs     : %d found so far\n", found)
+		}
 		color.New(color.FgCyan).Printf("  Saved at           : %s\n", existingCP.SavedAt)
 		fmt.Println()
 
@@ -211,7 +222,7 @@ func main() {
 			cp = existingCP
 			mode = cp.Mode
 			workers = cp.Workers
-			scanPort = cp.Port
+			scanPorts = cp.GetPorts()
 			existingPRs = cp.GetPingResults()
 			skipPingPhase = cp.Phase == scanner.PhaseSpeed
 			fmt.Println()
@@ -228,11 +239,20 @@ func main() {
 		if mode == 2 {
 			workers = askWorkerCount()
 		}
-		scanPort = askCustomPort()
+		scanPorts = askScanPorts()
 	}
 
-	scanner.SetPort(scanPort)
-	scanner.SetXrayOverridePort(scanPort)
+	scanner.SetPorts(scanPorts)
+	multiPort := scanner.MultiPort()
+
+	unit := "IPs"
+	unitParen := "IP(s)"
+	if multiPort {
+		unit = "IP:Port pairs"
+		unitParen = "IP:Port pair(s)"
+		fmt.Println()
+		utils.PrintScanPorts(scanPorts)
+	}
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -273,7 +293,7 @@ func main() {
 	pingWasStopped := false
 
 	if skipPingPhase {
-		color.New(color.FgCyan).Printf("Resuming at speed test phase with %d responsive IPs...\n\n", len(existingPRs))
+		color.New(color.FgCyan).Printf("Resuming at speed test phase with %d responsive %s...\n\n", len(existingPRs), unit)
 		pingResults = existingPRs
 	} else {
 		ipRanges := config.GetCloudflareRanges()
@@ -291,7 +311,7 @@ func main() {
 		} else {
 			allIPs, seed := scanner.GenerateIPs(ipRanges)
 			scanIPs = allIPs
-			cp = scanner.NewCheckpoint(mode, workers, scanPort, len(allIPs), seed)
+			cp = scanner.NewCheckpoint(mode, workers, scanPorts, len(allIPs), seed)
 			cp.Save()
 			fmt.Println()
 		}
@@ -393,19 +413,19 @@ func main() {
 
 	if interrupted {
 		color.New(color.FgYellow, color.Bold).Printf(
-			"\nShowing %d clean IP(s) found before scan was stopped:\n", len(results))
+			"\nShowing %d clean %s found before scan was stopped:\n", len(results), unitParen)
 	}
 
-	utils.PrintResults(topResults)
+	utils.PrintResults(topResults, multiPort)
 
-	if err := utils.SaveResults(results, "clean_ips.txt"); err != nil {
+	if err := utils.SaveResults(results, "clean_ips.txt", multiPort); err != nil {
 		color.New(color.FgRed).Printf("Error saving file: %v\n", err)
 	} else {
 		color.New(color.FgGreen).Println("Results saved to clean_ips.txt")
-		color.New(color.FgGreen).Printf("Total clean IPs found: %d\n", len(results))
+		color.New(color.FgGreen).Printf("Total clean %s found: %d\n", unit, len(results))
 	}
 
-	if err := utils.SaveSimpleResults(topResults, pingResults, "clean_ips_list.txt"); err != nil {
+	if err := utils.SaveSimpleResults(topResults, pingResults, "clean_ips_list.txt", multiPort); err != nil {
 		color.New(color.FgRed).Printf("Error saving simple list: %v\n", err)
 	} else {
 		color.New(color.FgGreen).Println("Simple IP list saved to clean_ips_list.txt")
