@@ -28,6 +28,7 @@ const (
 
 type IPResult struct {
 	IP            *net.IPAddr
+	Port          int
 	Sended        int
 	Received      int
 	LossRate      float32
@@ -106,7 +107,7 @@ func (r *uploadReader) speedBytesPerSec(timeout time.Duration) float64 {
 	return r.e.Value() * 100 / timeout.Seconds()
 }
 
-func getDialContext(ip *net.IPAddr) func(ctx context.Context, network, address string) (net.Conn, error) {
+func getDialContext(ip *net.IPAddr, port int) func(ctx context.Context, network, address string) (net.Conn, error) {
 	var targetAddr string
 	if isIPv4(ip.String()) {
 		targetAddr = fmt.Sprintf("%s:%d", ip.String(), port)
@@ -120,10 +121,10 @@ func getDialContext(ip *net.IPAddr) func(ctx context.Context, network, address s
 	}
 }
 
-func downloadHandler(ip *net.IPAddr) float64 {
+func downloadHandler(ip *net.IPAddr, port int) float64 {
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext:           getDialContext(ip),
+			DialContext:           getDialContext(ip, port),
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
@@ -201,11 +202,11 @@ func downloadHandler(ip *net.IPAddr) float64 {
 	return e.Value() * 100 / downloadTimeout.Seconds()
 }
 
-func uploadHandler(ip *net.IPAddr) float64 {
+func uploadHandler(ip *net.IPAddr, port int) float64 {
 	reader := newUploadReader(uploadBytes, uploadTimeout)
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext:           getDialContext(ip),
+			DialContext:           getDialContext(ip, port),
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
@@ -238,6 +239,8 @@ func uploadHandler(ip *net.IPAddr) float64 {
 }
 
 func SpeedTest(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
+	barBase := len(pingResults)
+	pingResults = selectSpeedCandidates(pingResults, defaultTestNum)
 	testCount := defaultTestNum
 	testNum := testCount
 	if len(pingResults) < testCount {
@@ -246,7 +249,7 @@ func SpeedTest(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
 	}
 
 	barPadding := "     "
-	for i := 0; i < len(strconv.Itoa(len(pingResults))); i++ {
+	for i := 0; i < len(strconv.Itoa(barBase)); i++ {
 		barPadding += " "
 	}
 
@@ -264,13 +267,15 @@ func SpeedTest(stopCh <-chan struct{}, pingResults []PingResult) []IPResult {
 		}
 
 		pr := pingResults[i]
-		downloadSpeed := downloadHandler(pr.IP)
+		speedPort := speedPortFor(pr.Port)
+		downloadSpeed := downloadHandler(pr.IP, speedPort)
 
 		if downloadSpeed >= minSpeed {
-			uploadSpeed := uploadHandler(pr.IP)
+			uploadSpeed := uploadHandler(pr.IP, speedPort)
 			bar.grow(1, "")
 			results = append(results, IPResult{
 				IP:            pr.IP,
+				Port:          pr.Port,
 				Sended:        pr.Sended,
 				Received:      pr.Received,
 				LossRate:      pr.GetLossRate(),
@@ -294,6 +299,10 @@ done:
 	}
 
 	fmt.Println()
-	color.New(color.FgGreen).Printf("Speed test completed: %d clean IPs found\n\n", len(results))
+	if MultiPort() {
+		color.New(color.FgGreen).Printf("Speed test completed: %d clean IP:Port pairs found\n\n", len(results))
+	} else {
+		color.New(color.FgGreen).Printf("Speed test completed: %d clean IPs found\n\n", len(results))
+	}
 	return results
 }
