@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 3.6.1)'
+        description: 'Release version (e.g., 4.0.0)'
         required: true
         type: string
       prerelease:
@@ -214,15 +214,14 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v3.6.1
+            ### What's New in v4.0.0
             
-            - Added real upload speed testing alongside the existing download speed test
-            - Every candidate IP is now tested for both download AND upload throughput using Cloudflare's speed test endpoints
-            - Results are now ranked by combined download + upload speed instead of download speed alone
-            - Upload speed is displayed next to download speed in the terminal results table
-            - Upload speed is also included in `clean_ips.txt` for every saved result
-            - Works in both Normal scan (TCP) and Xray scan modes
-            - Minor visual polish to the terminal output, including a more compact results table for mobile screens
+            - Added multi-port scanning: you can now enter between 1 and 13 ports at once, separated by commas (for example `443,8443,2053,2083,2087,2096,80,8080,8880,2052,2082,2086,2095`)
+            - Every IP is now tested on every port you enter, in both Normal scan (TCP) and Xray scan modes
+            - Results now show exactly which port each clean IP works on: the terminal table has a new Port column, and both `clean_ips.txt` and `clean_ips_list.txt` list every result as `IP:Port`
+            - The speed test now picks results from different IPs first, so one IP that works on many ports does not fill the whole top 10
+            - Interrupted multi-port scans can be resumed, and all selected ports are restored automatically
+            - Single-port scans work exactly as before and keep the same output format
             
             ### Xray Mode Configuration
             
