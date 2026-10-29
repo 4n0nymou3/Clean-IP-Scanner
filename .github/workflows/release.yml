@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 4.0.0)'
+        description: 'Release version (e.g., 4.1.0)'
         required: true
         type: string
       prerelease:
@@ -100,7 +100,7 @@ jobs:
           done
 
           echo "Trying fallback with hardcoded version..."
-          FALLBACK_VERSION="v26.3.27"
+          FALLBACK_VERSION="v26.10.29"
           FALLBACK_URL="https://github.com/XTLS/Xray-core/releases/download/${FALLBACK_VERSION}/Xray-android-arm64-v8a.zip"
           echo "Using fallback URL: $FALLBACK_URL"
 
@@ -214,7 +214,7 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v4.0.0
+            ### What's New in v4.1.0
             
             - Added multi-port scanning: you can now enter between 1 and 13 ports at once, separated by commas (for example `443,8443,2053,2083,2087,2096,80,8080,8880,2052,2082,2086,2095`)
             - Every IP is now tested on every port you enter, in both Normal scan (TCP) and Xray scan modes
