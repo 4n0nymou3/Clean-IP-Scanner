@@ -255,7 +255,7 @@ IP‌ها بر اساس مجموع سرعت دانلود و آپلود (بالا
 =================================================
 ...:..::.::: Engineered by: Anonymous :::.::..:...
 
-Version: 4.0.0
+Version: 4.1.0
 
 Optimized for Iran network conditions
 Press Ctrl+C at any time to stop and see results found so far.
