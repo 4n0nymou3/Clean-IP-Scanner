@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 4.1.0)'
+        description: 'Release version (e.g., 4.2.0)'
         required: true
         type: string
       prerelease:
@@ -214,20 +214,23 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v4.1.0
+            ### What's New in v4.2.0
             
-            - Added multi-port scanning: you can now enter between 1 and 13 ports at once, separated by commas (for example `443,8443,2053,2083,2087,2096,80,8080,8880,2052,2082,2086,2095`)
-            - Every IP is now tested on every port you enter, in both Normal scan (TCP) and Xray scan modes
-            - Results now show exactly which port each clean IP works on: the terminal table has a new Port column, and both `clean_ips.txt` and `clean_ips_list.txt` list every result as `IP:Port`
-            - The speed test now picks results from different IPs first, so one IP that works on many ports does not fill the whole top 10
-            - Interrupted multi-port scans can be resumed, and all selected ports are restored automatically
-            - Single-port scans work exactly as before and keep the same output format
+            - Xray configuration can now be entered directly inside the scanner: choose Xray scan, pick URL or JSON, and paste your config into the terminal (multi-line JSON is supported, finish it with `END` on its own line)
+            - Your configuration is validated first and saved automatically only if it is valid, so there is no need to edit files with nano
+            - A previously saved configuration is detected automatically, and you can keep using it or choose to edit it; the same check also runs when you resume an unfinished Xray scan
+            - The format you save last is the one the scanner uses, and your other saved configuration is never deleted
+            - After every scan, `clean_ips.txt` and `clean_ips_list.txt` are copied automatically to your Android Downloads folder (`~/storage/downloads/`), including scans stopped with Ctrl+C, and previous exports are replaced
+            - On the first export Android asks for storage permission once; tap Allow and every later scan exports without any questions
+            - If permission is not granted, your results stay safe in the scanner folder and clear recovery steps are shown
             
             ### Xray Mode Configuration
             
-            Edit **one** of these files with your config:
-            - **URL format** → `config/xray_config.txt`
-            - **JSON format** → `config/xray_config.json`
+            Choose **Xray scan** and paste your config when asked:
+            - **URL format** → saved to `config/xray_config.txt`
+            - **JSON format** → saved to `config/xray_config.json`
+            
+            Manual editing of these files is still supported.
             
             ---
             Made with love for Iranian users
