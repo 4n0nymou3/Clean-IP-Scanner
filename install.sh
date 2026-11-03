@@ -169,12 +169,12 @@ fi
 if [ ! -f "config/xray_config.txt" ]; then
     cat > config/xray_config.txt << 'EOF'
 # Xray URL Config
-# Put your proxy URL on the line below (remove the # at the start).
+# You do not need to edit this file by hand:
+# choose "Xray scan" in the scanner and paste your config there.
+# Manual editing still works: put your proxy URL on a new line below.
 # Supported formats: vless://, vmess://, trojan://, ss://
 # Example:
 # vless://your-uuid@your-server.com:443?type=ws&security=tls&host=your-server.com&path=%2F&sni=your-server.com#MyConfig
-#
-# If this file has a valid URL, it will be used instead of xray_config.json.
 EOF
     echo "✓ Sample URL config created at config/xray_config.txt"
 else
@@ -217,11 +217,17 @@ echo "    2) Worker count (Xray mode only)"
 echo "    3) Scan port (press Enter for default port 443,"
 echo "         or enter any port number between 1 and 65535)"
 echo ""
-echo "  For Xray mode, edit ONE of these files:"
+echo "  For Xray mode, just choose option 2 and paste your config"
+echo "  (URL or JSON) directly into the terminal. It is validated and"
+echo "  saved automatically, and reused in your next scans."
+echo "  Optional manual editing:"
 echo "    URL format : ~/Clean-IP-Scanner/config/xray_config.txt"
 echo "    JSON format: ~/Clean-IP-Scanner/config/xray_config.json"
 echo ""
 echo "  Results saved to: clean_ips.txt and clean_ips_list.txt"
+echo "  After each scan both files are also copied to your Android"
+echo "  Downloads folder (~/storage/downloads). Android asks for storage"
+echo "  permission once - tap Allow."
 echo ""
 echo "You can now run: clean-ip-scanner"
 echo ""
