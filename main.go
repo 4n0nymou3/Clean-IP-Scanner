@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,7 +19,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const version = "4.1.0"
+const version = "4.2.0"
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J\033[3J")
@@ -47,6 +49,16 @@ func printScanStats(elapsed time.Duration, interrupted bool) {
 	fmt.Println()
 }
 
+func exitWithConfigError(err error) {
+	fmt.Println()
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		color.New(color.FgRed).Println("Error: input was closed before a valid Xray configuration was provided.")
+	} else {
+		color.New(color.FgRed).Println("Error: " + err.Error())
+	}
+	os.Exit(1)
+}
+
 func askScanMode() int {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -65,14 +77,8 @@ func askScanMode() int {
 				color.New(color.FgRed).Println("Error: Xray binary not found. Please reinstall the tool.")
 				os.Exit(1)
 			}
-			if err := scanner.ValidateXrayConfig(); err != nil {
-				fmt.Println()
-				color.New(color.FgRed).Println("Error: " + err.Error())
-				fmt.Println()
-				color.New(color.FgYellow).Println("How to fix:")
-				color.New(color.FgWhite).Println("  For URL config : edit config/xray_config.txt  (paste vless:// or vmess:// or trojan:// or ss:// link)")
-				color.New(color.FgWhite).Println("  For JSON config: edit config/xray_config.json (paste full Xray JSON config)")
-				os.Exit(1)
+			if err := scanner.EnsureXrayConfig(reader, os.Stdout); err != nil {
+				exitWithConfigError(err)
 			}
 			fmt.Println()
 			color.New(color.FgCyan).Println("Running Xray environment self-test...")
@@ -227,6 +233,11 @@ func main() {
 			skipPingPhase = cp.Phase == scanner.PhaseSpeed
 			fmt.Println()
 			color.New(color.FgGreen).Println("Resuming previous scan...")
+			if mode == 2 {
+				if err := scanner.EnsureXrayConfig(bufio.NewReader(os.Stdin), os.Stdout); err != nil {
+					exitWithConfigError(err)
+				}
+			}
 		} else {
 			scanner.DeleteCheckpoint()
 			fmt.Println()
@@ -418,17 +429,29 @@ func main() {
 
 	utils.PrintResults(topResults, multiPort)
 
+	resultsSaved := false
 	if err := utils.SaveResults(results, "clean_ips.txt", multiPort); err != nil {
 		color.New(color.FgRed).Printf("Error saving file: %v\n", err)
 	} else {
+		resultsSaved = true
 		color.New(color.FgGreen).Println("Results saved to clean_ips.txt")
 		color.New(color.FgGreen).Printf("Total clean %s found: %d\n", unit, len(results))
 	}
 
+	listSaved := false
 	if err := utils.SaveSimpleResults(topResults, pingResults, "clean_ips_list.txt", multiPort); err != nil {
 		color.New(color.FgRed).Printf("Error saving simple list: %v\n", err)
 	} else {
+		listSaved = true
 		color.New(color.FgGreen).Println("Simple IP list saved to clean_ips_list.txt")
+	}
+
+	if resultsSaved && listSaved {
+		signal.Stop(sigChan)
+		utils.ExportResultsToDownloads(os.Stdout, utils.DefaultExportDeps(), []string{"clean_ips.txt", "clean_ips_list.txt"})
+	} else {
+		fmt.Println()
+		color.New(color.FgYellow).Println("Results were not copied to the Android Downloads folder because one or both result files could not be saved.")
 	}
 
 	printScanStats(elapsed, interrupted)
