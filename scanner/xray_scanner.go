@@ -405,20 +405,7 @@ func validateJSONConfig(content string) error {
 	return nil
 }
 
-func ValidateXrayConfig() error {
-	if data, err := os.ReadFile(xrayURLConfigPath); err == nil {
-		content := strings.TrimSpace(string(data))
-		for _, line := range strings.Split(content, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			if err := validateURLConfig(line); err != nil {
-				return fmt.Errorf("invalid URL config in xray_config.txt: %v", err)
-			}
-			return nil
-		}
-	}
+func validateJSONConfigFile() error {
 	data, err := os.ReadFile(xrayJSONConfigPath)
 	if err != nil {
 		return fmt.Errorf("no config found — please edit config/xray_config.txt (URL) or config/xray_config.json (JSON)")
@@ -433,7 +420,32 @@ func ValidateXrayConfig() error {
 	return nil
 }
 
+func ValidateXrayConfig() error {
+	if activeXrayFormat() == XrayFormatJSON {
+		return validateJSONConfigFile()
+	}
+	if data, err := os.ReadFile(xrayURLConfigPath); err == nil {
+		content := strings.TrimSpace(string(data))
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if err := validateURLConfig(line); err != nil {
+				return fmt.Errorf("invalid URL config in xray_config.txt: %v", err)
+			}
+			return nil
+		}
+	}
+	return validateJSONConfigFile()
+}
+
 func readXrayConfig() (string, bool, error) {
+	if activeXrayFormat() == XrayFormatJSON {
+		if data, err := os.ReadFile(xrayJSONConfigPath); err == nil {
+			return strings.TrimSpace(string(data)), false, nil
+		}
+	}
 	if data, err := os.ReadFile(xrayURLConfigPath); err == nil {
 		content := strings.TrimSpace(string(data))
 		for _, line := range strings.Split(content, "\n") {
