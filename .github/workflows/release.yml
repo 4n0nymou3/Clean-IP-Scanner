@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 4.2.0)'
+        description: 'Release version (e.g., 4.2.1)'
         required: true
         type: string
       prerelease:
@@ -214,7 +214,7 @@ jobs:
             
             Press Ctrl+C to stop and see results.
             
-            ### What's New in v4.2.0
+            ### What's New in v4.2.1
             
             - Xray configuration can now be entered directly inside the scanner: choose Xray scan, pick URL or JSON, and paste your config into the terminal (multi-line JSON is supported, finish it with `END` on its own line)
             - Your configuration is validated first and saved automatically only if it is valid, so there is no need to edit files with nano
@@ -222,6 +222,8 @@ jobs:
             - The format you save last is the one the scanner uses, and your other saved configuration is never deleted
             - After every scan, `clean_ips.txt` and `clean_ips_list.txt` are copied automatically to your Android Downloads folder (`~/storage/downloads/`), including scans stopped with Ctrl+C, and previous exports are replaced
             - On the first export Android asks for storage permission once; tap Allow and every later scan exports without any questions
+            - If your Termux storage directory already exists, Termux may ask `Do you want to continue? (y/n)`; the scanner explains this beforehand: type `y` and press Enter (your Android files are not deleted), then tap Allow when Android asks
+            - If you answer `n`, the export is cancelled right away without a long wait, and your result files stay untouched in the scanner folder
             - If permission is not granted, your results stay safe in the scanner folder and clear recovery steps are shown
             
             ### Xray Mode Configuration
