@@ -27,16 +27,25 @@ func DefaultExportDeps() ExportDeps {
 		HomeDir:  os.UserHomeDir,
 		LookPath: exec.LookPath,
 		RunSetup: func(path string) error {
-			cmd := exec.Command(path)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			return cmd.Run()
+			return newSetupCommand(path).Run()
 		},
 		Rename:       os.Rename,
 		PollInterval: time.Second,
 		PollTimeout:  60 * time.Second,
 	}
+}
+
+func newSetupCommand(path string) *exec.Cmd {
+	cmd := exec.Command(path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+func storageDirExists(home string) bool {
+	fi, err := os.Stat(filepath.Join(home, "storage"))
+	return err == nil && fi.IsDir()
 }
 
 func downloadsDirWritable(dir string) bool {
@@ -131,22 +140,51 @@ func ExportResultsToDownloads(out io.Writer, deps ExportDeps, names []string) er
 		}
 		cyan.Fprintln(out, "Android storage access is needed to copy your results to the Downloads folder.")
 		white.Fprintln(out, "Requesting storage permission now (termux-setup-storage)...")
-		yellow.Fprintln(out, "Android may show a permission request. Please tap Allow.")
+		fmt.Fprintln(out)
+		if storageDirExists(home) {
+			yellow.Fprintln(out, "Your Termux storage directory already exists.")
+			white.Fprintln(out, "Two separate steps may follow:")
+			white.Fprintln(out)
+			white.Fprintln(out, "  Step 1 - Termux confirmation (in this terminal):")
+			white.Fprintln(out, "    Termux may ask before rebuilding its storage links:")
+			white.Fprintln(out, "      Do you want to continue? (y/n)")
+			white.Fprintln(out, "    Type y and press Enter to continue.")
+			white.Fprintln(out, "    This only rebuilds Termux's storage-link structure. It does not delete")
+			white.Fprintln(out, "    your actual Android shared-storage files, including files in Downloads.")
+			white.Fprintln(out)
+			white.Fprintln(out, "  Step 2 - Android permission (a separate dialog):")
+			white.Fprintln(out, "    Android may then show a storage permission request. Please tap Allow.")
+			white.Fprintln(out, "    Typing y in Termux does not grant this permission.")
+		} else {
+			yellow.Fprintln(out, "Android may show a permission request. Please tap Allow.")
+		}
 		fmt.Fprintln(out)
 		if runErr := deps.RunSetup(setupPath); runErr != nil {
-			yellow.Fprintf(out, "termux-setup-storage reported a problem: %v\n", runErr)
-		}
-		white.Fprintln(out, "Waiting for storage access to be approved...")
-		if !waitForDownloads(dir, deps) {
-			fmt.Fprintln(out)
-			red.Fprintln(out, "Storage access was not granted, so the results were not copied to Downloads.")
-			white.Fprintln(out, "Your result files are still saved in the scanner folder.")
-			yellow.Fprintln(out, "How to fix:")
-			white.Fprintln(out, "  1. Run: termux-setup-storage  and tap Allow when Android asks.")
-			white.Fprintln(out, "     If the request does not appear, open Android Settings > Apps > Termux")
-			white.Fprintln(out, "     > Permissions and allow Files / Storage access.")
-			white.Fprintln(out, "  2. Run the scanner again. Results will then be copied automatically.")
-			return fmt.Errorf("storage access not granted")
+			if !downloadsDirWritable(dir) {
+				fmt.Fprintln(out)
+				red.Fprintln(out, "Automatic export was cancelled because termux-setup-storage did not complete.")
+				white.Fprintf(out, "Reason: %v\n", runErr)
+				white.Fprintln(out, "Your result files are still saved in the scanner folder.")
+				yellow.Fprintln(out, "How to fix:")
+				white.Fprintln(out, "  Run the scanner again and answer y when Termux asks, then tap Allow")
+				white.Fprintln(out, "  when Android asks. Or run termux-setup-storage yourself first.")
+				return fmt.Errorf("storage setup did not complete: %v", runErr)
+			}
+			yellow.Fprintf(out, "termux-setup-storage reported a problem (%v), but Downloads is accessible.\n", runErr)
+		} else {
+			white.Fprintln(out, "Waiting for storage access to be approved...")
+			if !waitForDownloads(dir, deps) {
+				fmt.Fprintln(out)
+				red.Fprintln(out, "Storage access was not granted, so the results were not copied to Downloads.")
+				white.Fprintln(out, "Your result files are still saved in the scanner folder.")
+				yellow.Fprintln(out, "How to fix:")
+				white.Fprintln(out, "  1. Run: termux-setup-storage  If Termux asks Do you want to continue? (y/n),")
+				white.Fprintln(out, "     type y and press Enter. Then tap Allow when Android asks.")
+				white.Fprintln(out, "     If the request does not appear, open Android Settings > Apps > Termux")
+				white.Fprintln(out, "     > Permissions and allow Files / Storage access.")
+				white.Fprintln(out, "  2. Run the scanner again. Results will then be copied automatically.")
+				return fmt.Errorf("storage access not granted")
+			}
 		}
 		green.Fprintln(out, "Storage access granted.")
 	}
